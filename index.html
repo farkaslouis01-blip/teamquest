@@ -47,8 +47,8 @@
           hp: '#c1432f',
           heal: '#4a9b6e',
           shield: '#5b8fc7',
-          orange: '#e0853c',
-          sport: '#9c6b47',
+          orange: '#ff8a3d',
+          sport: '#8c7d6c',
         },
         fontFamily: {
           display: ['Cinzel', 'serif'],
@@ -1423,10 +1423,10 @@ function WeightChart({ series }) {
             {formatShortDate(series[i].date)}
           </text>
         ))}
-        <path d={pathD} fill="none" stroke="#9c6b47" strokeWidth="2" />
+        <path d={pathD} fill="none" stroke="#8c7d6c" strokeWidth="2" />
         {points.map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r={activeIdx === i ? 5 : 3}
-            fill={activeIdx === i ? '#d4a843' : '#9c6b47'}
+            fill={activeIdx === i ? '#d4a843' : '#8c7d6c'}
             stroke={activeIdx === i ? '#15121e' : 'none'} strokeWidth={activeIdx === i ? 1.5 : 0}
             onClick={() => setActiveIdx(activeIdx === i ? null : i)}
             style={{ cursor: 'pointer' }} />
@@ -2725,8 +2725,14 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
           })}
         </div>
       </div>
-      <div className="text-[10px] text-inkDim mt-2 space-y-0.5">
-        <div>🟢 Quest erledigt · 🟠 Aufgabe geplant · 🔵 Termin geplant · 🟡 Item geplant{profile.sportTrackingEnabled ? ' · 🟤 Sport getrackt' : ''}</div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-inkDim mt-2">
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-heal"></span>Quest erledigt</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange"></span>Aufgabe geplant</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-shield"></span>Termin geplant</span>
+        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-gold"></span>Item geplant</span>
+        {profile.sportTrackingEnabled && (
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-sport"></span>Sport getrackt</span>
+        )}
       </div>
       {showMonthPicker && (
         <MonthYearPicker year={year} month={month} onJump={jumpToMonth} onClose={() => setShowMonthPicker(false)} />
