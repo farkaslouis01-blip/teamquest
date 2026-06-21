@@ -67,6 +67,7 @@
   :root { color-scheme: dark; }
   * { -webkit-tap-highlight-color: transparent; }
   html, body { background: #15121e; overscroll-behavior-y: none; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   body {
     font-family: 'Inter', sans-serif;
     padding-bottom: env(safe-area-inset-bottom);
@@ -424,6 +425,19 @@ function clearPairingCode() { localStorage.removeItem(PAIRING_KEY); }
 // andere Gerät umschalten.
 const ACTIVE_PROFILE_KEY = 'teamquest_active_profile_v1';
 function getStoredActiveProfileId() { return localStorage.getItem(ACTIVE_PROFILE_KEY); }
+
+// App-Größe auf DIESEM Gerät — unabhängig von der Anzeigegröße/Schriftgröße des
+// Telefons selbst. Skaliert die Root-Schriftgröße, an der alle (rem-basierten)
+// Tailwind-Maße hängen, wirkt also wie ein eigener, geräteweiter Zoom-Regler nur
+// für diese App. Bewusst NICHT Teil des synchronisierten States (reine Geräte-Präferenz).
+const UI_SCALE_KEY = 'teamquest_ui_scale_v1';
+function getStoredUiScale() {
+  const v = parseFloat(localStorage.getItem(UI_SCALE_KEY));
+  return (!isNaN(v) && v >= 0.7 && v <= 1.3) ? v : 1;
+}
+function applyUiScale(scale) {
+  document.documentElement.style.fontSize = (16 * scale) + 'px';
+}
 
 function generatePairingCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne I/O/0/1 — Verwechslungsgefahr beim Abtippen
@@ -1715,11 +1729,17 @@ function DeleteQuestsModal({ quests, categories, onDelete, onClose }) {
 }
 
 function QuestCard({ quest, stage, onComplete, onUncomplete, locked }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="bg-surface border border-border rounded-2xl p-3.5 flex items-center gap-3">
       <div className="text-2xl w-9 text-center shrink-0">{quest.icon}</div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-ink truncate">{quest.title}</div>
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className={`text-sm font-medium text-ink text-left ${expanded ? '' : 'truncate'}`}
+        >
+          {quest.title}
+        </button>
         <div className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</div>
       </div>
       <div className="flex gap-1.5 shrink-0">
@@ -2445,6 +2465,42 @@ function InventoryLogList({ profile, partner, sharedInventory }) {
   );
 }
 
+function UiScaleSetting() {
+  const [scale, setScale] = useState(() => getStoredUiScale());
+
+  function changeScale(next) {
+    const clamped = Math.round(Math.min(1.3, Math.max(0.8, next)) * 100) / 100;
+    setScale(clamped);
+    localStorage.setItem(UI_SCALE_KEY, String(clamped));
+    applyUiScale(clamped);
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-4">
+      <div className="text-sm font-medium text-ink mb-1">App-Größe auf diesem Gerät</div>
+      <div className="text-xs text-inkDim leading-relaxed mb-4">
+        Wirkt auf Texte, Karten und Abstände in der App — unabhängig von der Anzeigegröße im Telefon selbst. Gilt nur für dieses Gerät, der Partner ist davon nicht betroffen.
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={() => changeScale(scale - 0.05)} disabled={scale <= 0.8}
+          className="w-11 h-11 rounded-xl border border-border bg-bgElevated text-ink text-lg font-bold disabled:opacity-30 active:scale-95">
+          −
+        </button>
+        <div className="flex-1 text-center font-stat text-base text-gold">{Math.round(scale * 100)}%</div>
+        <button onClick={() => changeScale(scale + 0.05)} disabled={scale >= 1.3}
+          className="w-11 h-11 rounded-xl border border-border bg-bgElevated text-ink text-lg font-bold disabled:opacity-30 active:scale-95">
+          +
+        </button>
+      </div>
+      {scale !== 1 && (
+        <button onClick={() => changeScale(1)} className="w-full text-xs text-inkDim mt-3 underline">
+          Auf 100% zurücksetzen
+        </button>
+      )}
+    </div>
+  );
+}
+
 function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
@@ -2452,6 +2508,7 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
   const sections = [
     { key: 'profil', label: 'Profil' },
     { key: 'bibliothek', label: 'Bibliothek' },
+    { key: 'anzeige', label: 'Anzeige' },
     { key: 'sync', label: 'Sync' },
     { key: 'daten', label: 'Daten' },
   ];
@@ -2494,6 +2551,12 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
       )}
 
       {section === 'bibliothek' && <MethodsLibrary profile={profile} />}
+
+      {section === 'anzeige' && (
+        <div className="space-y-4">
+          <UiScaleSetting />
+        </div>
+      )}
 
       {section === 'sync' && (
         <div className="space-y-4">
@@ -2699,6 +2762,10 @@ function PairingSetup({ onComplete }) {
 
 function App() {
   const [pairingCode, setPairingCodeState] = useState(() => getPairingCode());
+
+  // Geräte-eigene App-Größe direkt beim Start anwenden, auf allen Bildschirmen
+  // (Kopplung, Ladebildschirm, Haupt-App) — unabhängig von Telefon-Einstellungen.
+  useEffect(() => { applyUiScale(getStoredUiScale()); }, []);
 
   if (!FIREBASE_READY) return <FirebaseSetupNotice />;
   if (!pairingCode) {
