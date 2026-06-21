@@ -789,15 +789,22 @@ function overdueDaysFor(item, scheduledDate, today) {
   return daysBetweenDateStrs(scheduledDate, today);
 }
 
+// Ein Eintrag ist sichtbar, wenn er nicht als "privat" markiert ist, oder wenn
+// die anschauende Person selbst der/die Ersteller(in) ist. Einträge ohne
+// visibility-Feld (alte Daten) gelten automatisch als geteilt.
+function isItemVisibleTo(item, viewerProfileId) {
+  return item.visibility !== 'private' || item.creatorId === viewerProfileId;
+}
+
 // Agenda für einen beliebigen Tag `day` (kann heute, in der Vergangenheit oder
 // Zukunft liegen): alles, was an diesem Tag fällig ist (inkl. mitgenommener
 // überfälliger Aufgaben, die heute landen) sowie alles, was an diesem Tag
 // tatsächlich erledigt wurde. `today` bleibt für Mitnehmen-/Überfällig-Logik
 // immer das echte heutige Datum, unabhängig von `day`.
-function getDayAgenda(state, day, today) {
+function getDayAgenda(state, day, today, viewerProfileId) {
   const out = [];
   const scanTo = day > today ? day : today;
-  (state.calendarItems || []).forEach(item => {
+  (state.calendarItems || []).filter(item => isItemVisibleTo(item, viewerProfileId)).forEach(item => {
     getOccurrencesInRange(item, item.date, scanTo).forEach(sched => {
       const occ = item.occurrences && item.occurrences[sched];
       const done = !!(occ && occ.done);
@@ -816,16 +823,16 @@ function getDayAgenda(state, day, today) {
 
 // Heutige Agenda (Spezialfall von getDayAgenda mit day = today) — bleibt für
 // den Quests-Tab unverändert immer an das echte heutige Datum gebunden.
-function getTodayAgenda(state, today) {
-  return getDayAgenda(state, today, today);
+function getTodayAgenda(state, today, viewerProfileId) {
+  return getDayAgenda(state, today, today, viewerProfileId);
 }
 
 // Vorschau der nächsten `daysAhead` Tage (rein informativ, nicht abhakbar).
-function getUpcomingAgenda(state, today, daysAhead) {
+function getUpcomingAgenda(state, today, daysAhead, viewerProfileId) {
   const fromDate = addDaysToDateStr(today, 1);
   const toDate = addDaysToDateStr(today, daysAhead);
   const out = [];
-  (state.calendarItems || []).forEach(item => {
+  (state.calendarItems || []).filter(item => isItemVisibleTo(item, viewerProfileId)).forEach(item => {
     getOccurrencesInRange(item, fromDate, toDate).forEach(sched => {
       out.push({ item, scheduledDate: sched, done: isOccurrenceDone(item, sched) });
     });
@@ -838,10 +845,10 @@ function getUpcomingAgenda(state, today, daysAhead) {
 // erledigte Aufgaben erscheinen am Tag, an dem sie ERLEDIGT wurden (nicht am
 // ursprünglich geplanten Tag) — offene Aufgaben/Termine am effektiven Tag
 // (heute, falls mitgenommen und überfällig; sonst am geplanten Tag).
-function getMonthAgenda(state, monthStart, monthEnd, today) {
+function getMonthAgenda(state, monthStart, monthEnd, today, viewerProfileId) {
   const byDate = {};
   const scanTo = monthEnd > today ? monthEnd : today;
-  (state.calendarItems || []).forEach(item => {
+  (state.calendarItems || []).filter(item => isItemVisibleTo(item, viewerProfileId)).forEach(item => {
     getOccurrencesInRange(item, item.date, scanTo).forEach(sched => {
       const occ = item.occurrences && item.occurrences[sched];
       const done = !!(occ && occ.done);
@@ -855,9 +862,9 @@ function getMonthAgenda(state, monthStart, monthEnd, today) {
 }
 
 // Protokoll: alle jemals erledigten Aufgaben-Vorkommen, neueste zuerst (nach Erledigungs-Datum).
-function getCompletionLog(state, limit) {
+function getCompletionLog(state, limit, viewerProfileId) {
   const out = [];
-  (state.calendarItems || []).forEach(item => {
+  (state.calendarItems || []).filter(item => isItemVisibleTo(item, viewerProfileId)).forEach(item => {
     if (item.kind !== 'aufgabe' || !item.occurrences) return;
     Object.keys(item.occurrences).forEach(sched => {
       const occ = item.occurrences[sched];
@@ -1242,6 +1249,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   const [recurType, setRecurType] = useState(editingItem && editingItem.recurrence ? editingItem.recurrence.type : 'none');
   const [weekdays, setWeekdays] = useState(editingItem && editingItem.recurrence && editingItem.recurrence.type === 'weekly' ? editingItem.recurrence.weekdays : []);
   const [carryForward, setCarryForward] = useState(editingItem ? !!editingItem.carryForward : true);
+  const [visibility, setVisibility] = useState(editingItem ? (editingItem.visibility || 'shared') : 'shared');
 
   function toggleWeekday(i) {
     setWeekdays(w => (w.includes(i) ? w.filter(x => x !== i) : [...w, i].sort()));
@@ -1269,6 +1277,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
       icon: icon.trim() || (kind === 'aufgabe' ? '📌' : '📅'),
       recurrence: buildRecurrence(),
       carryForward: kind === 'aufgabe' ? carryForward : false,
+      visibility,
     });
   }
 
@@ -1347,6 +1356,16 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
             </button>
           </div>
         )}
+        <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+          <div className="pr-3">
+            <div className="text-sm text-ink">Für beide sichtbar</div>
+            <div className="text-[10px] text-inkDim">Aus = nur du siehst diesen Eintrag, dein Partner nicht.</div>
+          </div>
+          <button onClick={() => setVisibility(v => (v === 'private' ? 'shared' : 'private'))}
+            className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${visibility !== 'private' ? 'bg-gold' : 'bg-border'}`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${visibility !== 'private' ? 'left-5' : 'left-0.5'}`}></span>
+          </button>
+        </div>
         <button disabled={!canSave} onClick={handleSave}
           className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
           {isEdit ? 'Speichern' : 'Hinzufügen'}
@@ -1362,10 +1381,11 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   );
 }
 
-function AgendaItemRow({ entry, onComplete, onEdit, actionable, showDate }) {
+function AgendaItemRow({ entry, profiles, onComplete, onEdit, actionable, showDate }) {
   const { item, scheduledDate, done, overdue } = entry;
   const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
   const escalated = overdue >= 7 ? 'hp' : overdue >= 3 ? 'orange' : null;
+  const creator = (profiles || []).find(p => p.id === item.creatorId) || null;
 
   return (
     <div className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
@@ -1387,6 +1407,12 @@ function AgendaItemRow({ entry, onComplete, onEdit, actionable, showDate }) {
                 · {overdue} {overdue === 1 ? 'Tag' : 'Tage'} überfällig
               </span>
             )}
+            {item.visibility === 'private' && <span title="Nur für dich sichtbar">🔒</span>}
+            {creator && (
+              <span className="ml-auto flex items-center gap-0.5 text-inkDim/70 shrink-0" title={`Erstellt von ${creator.name}`}>
+                {creator.icon} {creator.name}
+              </span>
+            )}
           </div>
         </div>
       </button>
@@ -1401,7 +1427,7 @@ function AgendaItemRow({ entry, onComplete, onEdit, actionable, showDate }) {
   );
 }
 
-function TodayAgendaCard({ entries, onComplete, onEdit, onAddClick }) {
+function TodayAgendaCard({ entries, profiles, onComplete, onEdit, onAddClick }) {
   return (
     <div className="bg-surface border border-border rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -1413,7 +1439,7 @@ function TodayAgendaCard({ entries, onComplete, onEdit, onAddClick }) {
       ) : (
         <div className="space-y-2">
           {entries.map(entry => (
-            <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+            <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={profiles}
               onComplete={onComplete} onEdit={onEdit} actionable showDate={false} />
           ))}
         </div>
@@ -1431,7 +1457,7 @@ function DateHeading({ dateStr, showYear }) {
   );
 }
 
-function UpcomingAgendaList({ entries, onEdit }) {
+function UpcomingAgendaList({ entries, profiles, onEdit }) {
   const [open, setOpen] = useState(false);
   const grouped = {};
   entries.forEach(e => {
@@ -1453,7 +1479,7 @@ function UpcomingAgendaList({ entries, onEdit }) {
               <DateHeading dateStr={d} />
               <div className="space-y-1.5">
                 {grouped[d].map(entry => (
-                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={profiles}
                     onComplete={() => {}} onEdit={onEdit} actionable={false} showDate={false} />
                 ))}
               </div>
@@ -1465,7 +1491,7 @@ function UpcomingAgendaList({ entries, onEdit }) {
   );
 }
 
-function CompletionLogList({ entries, onEdit }) {
+function CompletionLogList({ entries, profiles, onEdit }) {
   const [open, setOpen] = useState(false);
   const grouped = {};
   entries.forEach(e => {
@@ -1486,16 +1512,24 @@ function CompletionLogList({ entries, onEdit }) {
             <div key={d}>
               <DateHeading dateStr={d} showYear />
               <div className="space-y-1.5">
-                {grouped[d].map(entry => (
-                  <button key={entry.item.id + '_' + entry.scheduledDate} onClick={() => onEdit(entry.item)}
-                    className="w-full flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5 text-left active:opacity-70">
-                    <span className="text-lg shrink-0 opacity-70">{entry.item.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-inkDim truncate">{entry.item.title}</div>
-                    </div>
-                    <span className="text-heal text-sm shrink-0">✓</span>
-                  </button>
-                ))}
+                {grouped[d].map(entry => {
+                  const creator = (profiles || []).find(p => p.id === entry.item.creatorId) || null;
+                  return (
+                    <button key={entry.item.id + '_' + entry.scheduledDate} onClick={() => onEdit(entry.item)}
+                      className="w-full flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5 text-left active:opacity-70">
+                      <span className="text-lg shrink-0 opacity-70">{entry.item.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-inkDim truncate">{entry.item.title}</div>
+                      </div>
+                      {creator && (
+                        <span className="text-[10px] text-inkDim/70 flex items-center gap-0.5 shrink-0" title={`Erstellt von ${creator.name}`}>
+                          {creator.icon} {creator.name}
+                        </span>
+                      )}
+                      <span className="text-heal text-sm shrink-0">✓</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1826,7 +1860,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
   const questXpCap = getQuestXpCapToday(state, profile, today);
   const allDone = state.quests.length > 0 && state.quests.every(q => todayProgress[q.id] === 'komplett');
   const someDone = state.quests.some(q => todayProgress[q.id]);
-  const todayAgenda = getTodayAgenda(state, today);
+  const todayAgenda = getTodayAgenda(state, today, profile.id);
 
   const categoriesWithQuests = state.questCategories.filter(cat => state.quests.some(q => q.category === cat));
 
@@ -1834,6 +1868,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
     <div className="px-4 pt-4 pb-28 space-y-4">
       <TodayAgendaCard
         entries={todayAgenda}
+        profiles={state.profiles}
         onComplete={onCalendarComplete}
         onEdit={onOpenEditCalendar}
         onAddClick={onOpenAddCalendar}
@@ -2262,7 +2297,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
   // sichtbaren Monat dem Tag zuordnen, an dem sie tatsächlich erscheinen sollen:
   // erledigte Aufgaben am Tag der Erledigung, offene am effektiven (ggf. mitgenommenen) Tag.
   const calendarByDate = daysInMonth > 0
-    ? getMonthAgenda(({ calendarItems: calendarItems || [] }), dateStrFor(1), dateStrFor(daysInMonth), todayBerlin())
+    ? getMonthAgenda(({ calendarItems: calendarItems || [] }), dateStrFor(1), dateStrFor(daysInMonth), todayBerlin(), profile.id)
     : {};
 
   return (
@@ -2998,6 +3033,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       s.calendarItems.push({
         id: uid('cal'), kind: data.kind, title: data.title, icon: data.icon, date: data.date,
         recurrence: data.recurrence, carryForward: data.carryForward, occurrences: {},
+        creatorId: activeProfile.id, visibility: data.visibility || 'shared',
       });
     });
     pushToast(data.kind === 'aufgabe' ? 'Aufgabe hinzugefügt.' : 'Termin hinzugefügt.', 'info');
@@ -3009,6 +3045,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       if (!item) return;
       item.kind = data.kind; item.title = data.title; item.date = data.date;
       item.icon = data.icon; item.recurrence = data.recurrence; item.carryForward = data.carryForward;
+      item.visibility = data.visibility || 'shared';
     });
     pushToast('Gespeichert.', 'info');
   }
@@ -3147,11 +3184,11 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   const myConfirmCount = state.pendingConfirmations.filter(c => c.partnerId === activeProfile.id).length;
-  const todayAgendaForBadge = getTodayAgenda(state, todayBerlin());
+  const todayAgendaForBadge = getTodayAgenda(state, todayBerlin(), activeProfile.id);
   const calendarBadgeCount = todayAgendaForBadge.filter(e => !e.done).length;
   const calendarViewedDate = calendarSelectedDate || todayBerlin();
-  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin());
-  const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30);
+  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id);
+  const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30, activeProfile.id);
   const plannedItemDates = new Set([
     ...(activeProfile.inventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
     ...(state.sharedInventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
@@ -3217,14 +3254,14 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             ) : (
               <div className="space-y-2">
                 {dayAgendaForCalendarTab.map(entry => (
-                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
                     onComplete={handleCalendarComplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
                     actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
                 ))}
               </div>
             )}
-            <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
-            <CompletionLogList entries={getCompletionLog(state, 100)} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+            <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+            <CompletionLogList entries={getCompletionLog(state, 100, activeProfile.id)} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
           </div>
           <SelectedDayQuestsCard profile={activeProfile} quests={state.quests} selectedDate={calendarSelectedDate} />
         </div>
