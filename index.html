@@ -68,6 +68,10 @@
   * { -webkit-tap-highlight-color: transparent; }
   html, body { background: #15121e; overscroll-behavior-y: none; }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  @keyframes calSlideInRight { from { transform: translateX(18px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes calSlideInLeft { from { transform: translateX(-18px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  .cal-slide-right { animation: calSlideInRight 0.22s ease-out; }
+  .cal-slide-left { animation: calSlideInLeft 0.22s ease-out; }
   body {
     font-family: 'Inter', sans-serif;
     padding-bottom: env(safe-area-inset-bottom);
@@ -2200,7 +2204,13 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
 
 function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate }) {
   const [monthOffset, setMonthOffset] = useState(0);
+  const [slideDir, setSlideDir] = useState('right'); // Richtung der letzten Monats-Animation
   const touchStartRef = useRef(null);
+
+  function goToMonth(delta) {
+    setSlideDir(delta > 0 ? 'right' : 'left');
+    setMonthOffset(o => o + delta);
+  }
 
   // Wisch-Geste: nach links wischen = nächster Monat, nach rechts wischen = vorheriger Monat.
   // Nur reagieren, wenn die Bewegung deutlich horizontaler als vertikaler Natur ist
@@ -2217,7 +2227,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
     touchStartRef.current = null;
     const SWIPE_THRESHOLD = 45;
     if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5) {
-      setMonthOffset(o => (dx < 0 ? o + 1 : o - 1));
+      goToMonth(dx < 0 ? 1 : -1);
     }
   }
 
@@ -2253,42 +2263,44 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
   return (
     <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div className="flex items-center justify-between mb-2">
-        <button onClick={() => setMonthOffset(o => o - 1)} className="text-inkDim px-2">‹</button>
+        <button onClick={() => goToMonth(-1)} className="text-inkDim px-2">‹</button>
         <div className="text-sm font-medium capitalize">{monthName}</div>
-        <button onClick={() => setMonthOffset(o => o + 1)} className="text-inkDim px-2">›</button>
+        <button onClick={() => goToMonth(1)} className="text-inkDim px-2">›</button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-inkDim mb-1">
         {['Mo','Di','Mi','Do','Fr','Sa','So'].map(d => <div key={d}>{d}</div>)}
       </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((d, i) => {
-          if (d === null) return <div key={i}></div>;
-          const dateStr = dateStrFor(d);
-          const done = hasProgress(d);
-          const dayEntries = calendarByDate[dateStr] || [];
-          const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe');
-          const hasTermin = dayEntries.some(e => e.item.kind === 'termin');
-          const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
-          const isSelected = selectedDate === dateStr;
-          const isToday = dateStr === todayBerlin();
-          return (
-            <button
-              key={i}
-              onClick={() => onSelectDate(isSelected ? null : dateStr)}
-              className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
-                isSelected ? 'bg-gold/15 border-gold' : 'bg-surface border-border'
-              } ${isToday ? 'ring-2 ring-goldBright ring-offset-1 ring-offset-bg' : ''}`}
-            >
-              <span className={isToday ? 'text-goldBright font-bold' : 'text-inkDim'}>{d}</span>
-              <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
-                {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
-                {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
-                {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
-                {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
-              </span>
-            </button>
-          );
-        })}
+      <div className="overflow-hidden">
+        <div key={monthOffset} className={`grid grid-cols-7 gap-1 ${slideDir === 'right' ? 'cal-slide-right' : 'cal-slide-left'}`}>
+          {cells.map((d, i) => {
+            if (d === null) return <div key={i}></div>;
+            const dateStr = dateStrFor(d);
+            const done = hasProgress(d);
+            const dayEntries = calendarByDate[dateStr] || [];
+            const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe');
+            const hasTermin = dayEntries.some(e => e.item.kind === 'termin');
+            const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
+            const isSelected = selectedDate === dateStr;
+            const isToday = dateStr === todayBerlin();
+            return (
+              <button
+                key={i}
+                onClick={() => onSelectDate(isSelected ? null : dateStr)}
+                className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
+                  isSelected ? 'bg-gold/15 border-gold' : 'bg-surface border-border'
+                } ${isToday ? 'ring-2 ring-goldBright ring-offset-1 ring-offset-bg' : ''}`}
+              >
+                <span className={isToday ? 'text-goldBright font-bold' : 'text-inkDim'}>{d}</span>
+                <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
+                  {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
+                  {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
+                  {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
+                  {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="text-[10px] text-inkDim mt-2 space-y-0.5">
         <div>🟢 Quest erledigt · 🟠 Aufgabe geplant · 🔵 Termin geplant · 🟡 Item geplant</div>
