@@ -1,0 +1,3075 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TeamQuest">
+<meta name="theme-color" content="#15121e">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315121e'/%3E%3Ctext x='50' y='66' font-size='56' text-anchor='middle'%3E%E2%9A%94%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315121e'/%3E%3Ctext x='50' y='66' font-size='56' text-anchor='middle'%3E%E2%9A%94%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<title>TeamQuest</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Firebase (Echtzeit-Sync zwischen den Geräten) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: '#15121e',
+          bgElevated: '#1c1828',
+          surface: '#241f33',
+          surface2: '#2f283f',
+          border: '#473d57',
+          ink: '#ece4d3',
+          inkDim: '#a9988a',
+          gold: '#d4a843',
+          goldBright: '#f0c869',
+          krieger: '#c1543c',
+          krieger2: '#8f3826',
+          magier: '#7d70e0',
+          magier2: '#564ba3',
+          priester: '#9fd6c4',
+          priester2: '#5fa692',
+          hp: '#c1432f',
+          heal: '#4a9b6e',
+          shield: '#5b8fc7',
+          orange: '#e0853c',
+        },
+        fontFamily: {
+          display: ['Cinzel', 'serif'],
+          body: ['Inter', 'sans-serif'],
+          stat: ['"JetBrains Mono"', 'monospace'],
+        },
+        boxShadow: {
+          glow: '0 0 24px rgba(212,168,67,0.35)',
+          hpglow: '0 0 18px rgba(193,67,47,0.55)',
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  :root { color-scheme: dark; }
+  * { -webkit-tap-highlight-color: transparent; }
+  html, body { background: #15121e; overscroll-behavior-y: none; }
+  body {
+    font-family: 'Inter', sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: env(safe-area-inset-top);
+  }
+  .font-display { letter-spacing: 0.02em; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #473d57; border-radius: 3px; }
+
+  .bg-vignette {
+    background:
+      radial-gradient(ellipse at top, rgba(125,112,224,0.10), transparent 55%),
+      radial-gradient(ellipse at bottom, rgba(193,84,60,0.08), transparent 55%),
+      #15121e;
+  }
+
+  .bar-track {
+    position: relative;
+    height: 14px;
+    border-radius: 999px;
+    background: #1c1828;
+    border: 1px solid #473d57;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.5s cubic-bezier(.2,.9,.2,1);
+  }
+  .bar-fill::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(255,255,255,0.15), transparent 60%);
+  }
+  .bar-low { animation: pulseLow 1.1s ease-in-out infinite; }
+  @keyframes pulseLow {
+    0%, 100% { box-shadow: 0 0 6px rgba(193,67,47,0.4); }
+    50% { box-shadow: 0 0 18px rgba(193,67,47,0.9); }
+  }
+
+  @keyframes floatUp {
+    0% { transform: translateY(0); opacity: 0; }
+    15% { opacity: 1; }
+    100% { transform: translateY(-46px); opacity: 0; }
+  }
+  .float-num { animation: floatUp 1.1s ease-out forwards; }
+
+  @keyframes popIn {
+    0% { transform: scale(0.85); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .pop-in { animation: popIn 0.22s cubic-bezier(.2,.9,.3,1.3); }
+
+  @keyframes slideUp {
+    0% { transform: translateY(16px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+  .slide-up { animation: slideUp 0.25s ease-out; }
+
+  @keyframes toastIn {
+    0% { transform: translateY(-12px); opacity: 0; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+  .toast-in { animation: toastIn 0.25s ease-out; }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
+  }
+  .shake { animation: shake 0.4s ease-in-out; }
+
+  .rune-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #473d57, transparent);
+  }
+
+  input, select, textarea { font-family: 'Inter', sans-serif; }
+  input:focus, select:focus, textarea:focus, button:focus-visible {
+    outline: 2px solid #d4a843;
+    outline-offset: 1px;
+  }
+
+  .safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+</style>
+</head>
+<body class="bg-vignette text-ink font-body min-h-screen">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+/* ============================================================
+   1. SPIELDATEN / KONSTANTEN
+   ============================================================ */
+
+const ANIMAL_ICONS = ['🐺','🦊','🐻','🦉','🦅','🦌','🦦','🐍','🦁','🐲'];
+const PROFILE_COLORS = ['#c1543c','#7d70e0','#4a9b6e','#d4a843','#5b8fc7','#c75b9e','#8c9a3a','#a06a3a'];
+
+const CLASSES = {
+  krieger: {
+    key: 'krieger', name: 'Krieger', icon: '⚔️',
+    color: '#c1543c', colorDark: '#8f3826',
+    teamHp: 50,
+    abilities: [
+      { id: 'k1', name: 'Angriff', unlockLevel: 0, kind: 'damage', value: 10,
+        desc: 'Ein einfacher Schwertschlag gegen den Boss.' },
+      { id: 'k2', name: 'Blutschlag', unlockLevel: 2, kind: 'damage_bleed', value: 8, bleedValue: 4, bleedTicks: 3,
+        desc: '8 Schaden, danach 4 Blutungsschaden über die nächsten 3 Aktionen.' },
+      { id: 'k3', name: 'Schildwall', unlockLevel: 4, kind: 'shield', shieldValue: 15,
+        desc: 'Kein Schaden, reduziert den nächsten Gegenangriff um 15.' },
+      { id: 'k4', name: 'Wuchtschlag', unlockLevel: 6, kind: 'damage_selfhurt', value: 20, selfHurt: 8,
+        desc: '20 Schaden, kostet aber 8 Team-HP.' },
+      { id: 'k5', name: 'Letzter Atem', unlockLevel: 9, kind: 'damage', value: 40, cooldownDays: 1,
+        desc: '40 Schaden. 1 Tag Abklingzeit.' },
+    ]
+  },
+  magier: {
+    key: 'magier', name: 'Magier', icon: '🔮',
+    color: '#7d70e0', colorDark: '#564ba3',
+    teamHp: 30,
+    abilities: [
+      { id: 'm1', name: 'Angriff', unlockLevel: 0, kind: 'damage', value: 8,
+        desc: 'Ein kleiner Energieblitz gegen den Boss.' },
+      { id: 'm2', name: 'Feuerball', unlockLevel: 2, kind: 'damage', value: 15,
+        desc: '15 Schaden.' },
+      { id: 'm3', name: 'Frostspeer', unlockLevel: 4, kind: 'damage_shield', value: 10, shieldValue: 8,
+        desc: '10 Schaden, reduziert den nächsten Gegenangriff um 8.' },
+      { id: 'm4', name: 'Blitzschlag', unlockLevel: 6, kind: 'damage_selfhurt', value: 20, selfHurt: 10,
+        desc: '20 Schaden, kostet aber 10 Team-HP.' },
+      { id: 'm5', name: 'Arkane Erschöpfung', unlockLevel: 9, kind: 'damage', value: 50, cooldownDays: 1,
+        desc: '50 Schaden. 1 Tag Abklingzeit.' },
+    ]
+  },
+  priester: {
+    key: 'priester', name: 'Priester', icon: '✨',
+    color: '#9fd6c4', colorDark: '#5fa692',
+    teamHp: 80,
+    abilities: [
+      { id: 'p1', name: 'Angriff', unlockLevel: 0, kind: 'damage', value: 6,
+        desc: 'Ein gebündelter Lichtstrahl gegen den Boss.' },
+      { id: 'p2', name: 'Segen', unlockLevel: 2, kind: 'heal', value: 15,
+        desc: 'Heilt das Team um 15 HP.' },
+      { id: 'p3', name: 'Schutzgebet', unlockLevel: 4, kind: 'shield', shieldValue: 30,
+        desc: 'Kein Schaden, reduziert den nächsten Gegenangriff um 30.' },
+      { id: 'p4', name: 'Gnadenstoß', unlockLevel: 6, kind: 'damage_heal', value: 20, healValue: 10,
+        desc: '20 Schaden und gleichzeitig 10 Heilung.' },
+      { id: 'p5', name: 'Gottesanbetung', unlockLevel: 9, kind: 'random_damage_heal', value: 60, cooldownDays: 1,
+        desc: 'Zufällig entweder 60 Heilung ODER 60 Schaden. 1 Tag Abklingzeit.' },
+    ]
+  }
+};
+
+const BOSS_TIERS = [
+  { name: 'Wegelagerer', emoji: '👹', hp: 100, gold: 20 },
+  { name: 'Wildschwein-Alpha', emoji: '🐗', hp: 160, gold: 40 },
+  { name: 'Drachenwache', emoji: '🐉', hp: 240, gold: 70 },
+  { name: 'Schattenfürst', emoji: '💀', hp: 400, gold: 120 },
+];
+const COUNTER_DAMAGE = [10, 16, 24, 40];
+
+function bossStatsForTier(tier) {
+  const idx = Math.min(tier, BOSS_TIERS.length - 1);
+  return BOSS_TIERS[idx];
+}
+function counterDamageForTier(tier) {
+  const idx = Math.min(tier, COUNTER_DAMAGE.length - 1);
+  return COUNTER_DAMAGE[idx];
+}
+function bossDisplayName(tier) {
+  const base = bossStatsForTier(tier).name;
+  return tier >= BOSS_TIERS.length ? `${base} — Rang ${tier - BOSS_TIERS.length + 2}` : base;
+}
+
+function xpForLevel(level) {
+  // XP, um von Level `level` auf `level + 1` zu kommen
+  return 90 + 5 * level * (level + 1);
+}
+
+const DEFAULT_QUEST_CATEGORIES = [
+  'Haushalt', 'Sport & Bewegung', 'Zeichnen', 'Uni', 'Verwaltung & Kommunikation', 'Struktur & Vorbereitung'
+];
+
+const DEFAULT_QUESTS = [
+  // Haushalt
+  { id: 'q1', title: 'Waschen / Körperpflege', xp: 10, icon: '🧼', category: 'Haushalt', custom: false },
+  { id: 'q2', title: '5-Minuten-Aufräumen', xp: 10, icon: '🧹', category: 'Haushalt', custom: false },
+  { id: 'q3', title: 'Spülen / Küche', xp: 10, icon: '🍽️', category: 'Haushalt', custom: false },
+  { id: 'q4', title: 'Wäsche wegräumen', xp: 10, icon: '👕', category: 'Haushalt', custom: false },
+  // Sport & Bewegung (eigenes ID-Präfix — die alte ID "q5" gehörte früher "Bonus-Aufgabe")
+  { id: 'sport1', title: 'Spazieren gehen', xp: 10, icon: '🚶', category: 'Sport & Bewegung', custom: false },
+  { id: 'sport2', title: 'Sport machen', xp: 10, icon: '🏃', category: 'Sport & Bewegung', custom: false },
+  { id: 'sport3', title: 'Ins Gym gehen', xp: 20, icon: '🏋️', category: 'Sport & Bewegung', custom: false },
+  // Zeichnen
+  { id: 'art1', title: 'Skizze starten', xp: 10, icon: '🎨', category: 'Zeichnen', custom: false },
+  { id: 'art2', title: 'Lineart fertigstellen', xp: 10, icon: '✏️', category: 'Zeichnen', custom: false },
+  { id: 'art3', title: 'Zeichnung kolorieren', xp: 10, icon: '🖌️', category: 'Zeichnen', custom: false },
+  { id: 'art4', title: 'Referenzen sammeln', xp: 10, icon: '📁', category: 'Zeichnen', custom: false },
+  { id: 'art5', title: 'Angefangenes Bild weiterführen', xp: 10, icon: '🖼️', category: 'Zeichnen', custom: false },
+  // Uni
+  { id: 'uni1', title: 'Kapitel/Skript lesen oder zusammenfassen', xp: 10, icon: '📖', category: 'Uni', custom: false },
+  { id: 'uni2', title: 'Vorlesungsmitschrift nacharbeiten', xp: 10, icon: '📝', category: 'Uni', custom: false },
+  { id: 'uni3', title: 'Lernen', xp: 10, icon: '📚', category: 'Uni', custom: false },
+  { id: 'uni4', title: 'Prüfungs-/Abgabetermin eintragen', xp: 10, icon: '🗓️', category: 'Uni', custom: false },
+  { id: 'uni5', title: 'Hausarbeit/Referat einen Schritt weiterbringen', xp: 20, icon: '🎓', category: 'Uni', custom: false },
+  // Verwaltung & Kommunikation
+  { id: 'admin1', title: 'Posteingang/Post sortieren', xp: 10, icon: '📧', category: 'Verwaltung & Kommunikation', custom: false },
+  { id: 'admin2', title: 'Formular/Antrag einen Schritt weiterbringen', xp: 20, icon: '📝', category: 'Verwaltung & Kommunikation', custom: false },
+  { id: 'admin3', title: 'Aufgeschobene Nachricht oder Anruf erledigen', xp: 20, icon: '📞', category: 'Verwaltung & Kommunikation', custom: false },
+  // Struktur & Vorbereitung
+  { id: 'struct1', title: 'Sachen für morgen vorbereiten', xp: 10, icon: '🎒', category: 'Struktur & Vorbereitung', custom: false },
+  { id: 'struct2', title: 'Arbeitsplatz 5 Minuten aufräumen', xp: 10, icon: '🧹', category: 'Struktur & Vorbereitung', custom: false },
+];
+
+const METHODS = [
+  { unlockLevel: 1, title: 'Die 2-Minuten-Regel', source: 'NICE-Leitlinie NG87',
+    text: 'Wenn eine Aufgabe schwer zu starten ist, reicht es, sich nur 2 Minuten dafür zu verpflichten. Der Start ist die eigentliche Hürde — danach läuft es meist von allein weiter. Deshalb zählt "Kurz begonnen" in TeamQuest als vollwertige Aktion.' },
+  { unlockLevel: 2, title: 'Reiz-Kopplung (Temptation Bundling)', source: 'Milkman et al., Wharton',
+    text: 'Kopple eine unangenehme Aufgabe an etwas, das dir Freude macht — z. B. nur beim Spülen deinen Lieblingspodcast hören. Die Belohnung läuft parallel zur Aufgabe statt erst danach.' },
+  { unlockLevel: 4, title: 'Externe Struktur & Body Doubling', source: 'NICE-Leitlinie / Body-Doubling-Forschung',
+    text: 'Allein die Anwesenheit einer anderen Person — auch ohne aktive Hilfe — erleichtert vielen Menschen mit ADS den Start und das Durchhalten einer Aufgabe. Erledigt eine Quest gemeinsam, auch wenn nur einer von euch aktiv ist.' },
+  { unlockLevel: 6, title: 'Reibung senken', source: 'Verhaltensökonomie / Habit-Forschung',
+    text: 'Jede zusätzliche Sekunde Vorbereitung senkt die Wahrscheinlichkeit, dass eine Aufgabe gestartet wird. Lege Putzmittel, Wäschekorb & Co. so bereit, dass der erste Schritt keine Entscheidung mehr braucht.' },
+  { unlockLevel: 9, title: 'Selbstmitgefühl', source: 'Wohl et al., Prokrastinationsforschung',
+    text: 'Selbstkritik nach einer ausgelassenen Aufgabe erhöht die Wahrscheinlichkeit, dass du es beim nächsten Mal wieder aufschiebst. Forschung zeigt: Wer sich selbst Aufschieben verzeiht, prokrastiniert seltener erneut.' },
+];
+
+function topUnlockedMethod(profile) {
+  const unlocked = METHODS.filter(m => profile.level >= m.unlockLevel);
+  return unlocked.length ? unlocked[unlocked.length - 1] : null;
+}
+
+const SHOP_GEMEINSAM = [
+  { id: 's1', title: 'Filmabend', cost: 50, icon: '🎬', custom: false },
+  { id: 's2', title: 'Quest-freier Tag', cost: 80, icon: '🌴', custom: false },
+  { id: 's3', title: 'Restaurant-Abend', cost: 150, icon: '🍝', custom: false },
+  { id: 's4', title: 'Kurztrip', cost: 250, icon: '🧳', custom: false },
+  { id: 's5', title: 'Spaziergang + Eis', cost: 20, icon: '🍦', custom: false },
+  { id: 's6', title: 'Spieleabend', cost: 30, icon: '🎲', custom: false },
+  { id: 's7', title: 'Pizza-/Takeout-Abend', cost: 35, icon: '🍕', custom: false },
+  { id: 's8', title: 'Café-Date', cost: 40, icon: '☕', custom: false },
+  { id: 's9', title: 'Bowling / Minigolf / Kart', cost: 70, icon: '🎳', custom: false },
+  { id: 's10', title: 'Wellness-Tag zuhause', cost: 90, icon: '🛁', custom: false },
+  { id: 's11', title: 'Escape Room / Event-Tag', cost: 130, icon: '🔐', custom: false },
+  { id: 's12', title: 'Konzert-/Event-Tickets', cost: 200, icon: '🎤', custom: false },
+];
+const SHOP_GESCHENK = [
+  { id: 'g1', title: 'Quest-Gutschein', cost: 40, icon: '🎟️', custom: false },
+  { id: 'g2', title: 'Frühstück ans Bett', cost: 50, icon: '🥐', custom: false },
+  { id: 'g3', title: 'Massage', cost: 70, icon: '💆', custom: false },
+  { id: 'g4', title: 'Überraschung', cost: 200, icon: '🎁', custom: false },
+  { id: 'g5', title: 'Kaffee/Tee ans Bett', cost: 15, icon: '☕', custom: false },
+  { id: 'g6', title: 'Lieblingssnack besorgen', cost: 20, icon: '🍫', custom: false },
+  { id: 'g7', title: 'Liebesbrief / Gedicht', cost: 20, icon: '💌', custom: false },
+  { id: 'g8', title: 'Eine Hausarbeit abnehmen', cost: 25, icon: '🧹', custom: false },
+  { id: 'g9', title: 'Fußmassage', cost: 35, icon: '🦶', custom: false },
+  { id: 'g10', title: 'Lieblingsessen kochen', cost: 55, icon: '🍳', custom: false },
+  { id: 'g11', title: 'Date-Night komplett planen', cost: 90, icon: '📅', custom: false },
+  { id: 'g12', title: 'Ein Wunsch frei (im Rahmen)', cost: 180, icon: '✨', custom: false },
+];
+
+const MAX_ACTIONS_PER_DAY = 3;
+const CALENDAR_XP_PER_TASK = 5;
+const CALENDAR_XP_DAILY_CAP = 10;
+const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const QUEST_XP_DAILY_BASE_CAP = 40;
+const QUEST_XP_CAP_BONUS_PER_HARD_QUEST = 5;
+const QUEST_HARD_XP_THRESHOLD = 20; // Quests mit diesem XP-Wert zählen als "schwer" und erhöhen den Tagesdeckel
+
+/* ============================================================
+   2. HILFSFUNKTIONEN
+   ============================================================ */
+
+function uid(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Alle Tagesgrenzen laufen über die deutsche Zeitzone, nicht über Gerätezeit.
+function todayBerlin() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
+function rollVariance(base) {
+  const factor = 0.85 + Math.random() * 0.30; // 0.85 – 1.15
+  return Math.max(1, Math.round(base * factor));
+}
+
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+
+/* ============================================================
+   3. STORAGE-SCHICHT (Firebase Realtime Database)
+   ------------------------------------------------------------
+   Ersetzt die alte localStorage-Lösung. Beide Geräte lesen/schreiben
+   denselben Pfad teamquest/{pairingCode} in der Firebase Realtime
+   Database — Änderungen kommen per Push in Echtzeit an (kein Polling).
+
+   EINRICHTUNG (einmalig):
+   1. Auf https://console.firebase.google.com ein Projekt anlegen.
+   2. Im Menü "Build" -> "Realtime Database" -> Datenbank erstellen
+      (Startmodus "Testmodus" reicht erstmal, Regeln kommen unten rein).
+   3. Im Menü "Build" -> "Authentication" -> "Sign-in method" ->
+      "Anonym" aktivieren.
+   4. Unter Projekteinstellungen (Zahnrad) -> "Meine Apps" -> Web-App
+      hinzufügen (</> Symbol) -> die angezeigten Werte unten in
+      FIREBASE_CONFIG eintragen.
+   5. In Realtime Database -> "Regeln" folgendes einfügen und
+      veröffentlichen:
+       {
+         "rules": {
+           "teamquest": {
+             "$code": {
+               ".read": "auth != null",
+               ".write": "auth != null"
+             }
+           }
+         }
+       }
+   ============================================================ */
+
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDGlPWc-Bl1mwFZaBtaTw5s5wOyf_wGlJU",
+  authDomain: "teamquest-8b291.firebaseapp.com",
+  databaseURL: "https://teamquest-8b291-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "teamquest-8b291",
+};
+
+let fbAuth = null, fbDb = null, FIREBASE_READY = false;
+try {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  fbAuth = firebase.auth();
+  fbDb = firebase.database();
+  FIREBASE_READY = true;
+} catch (e) {
+  console.error('TeamQuest: Firebase-Initialisierung fehlgeschlagen — FIREBASE_CONFIG korrekt?', e);
+}
+
+// Eindeutige Kennung für dieses Gerät/diese Seitenladung — verhindert, dass
+// ein eigener Schreibvorgang beim Zurücklesen als neue Partner-Änderung
+// missverstanden wird (würde sonst zu einer Endlosschleife führen).
+const CLIENT_ID = uid('client');
+
+const PAIRING_KEY = 'teamquest_pairing_code_v1';
+function getPairingCode() { return localStorage.getItem(PAIRING_KEY); }
+function setStoredPairingCode(code) { localStorage.setItem(PAIRING_KEY, code); }
+function clearPairingCode() { localStorage.removeItem(PAIRING_KEY); }
+
+function generatePairingCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne I/O/0/1 — Verwechslungsgefahr beim Abtippen
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+const Storage = {
+  ref(code) { return fbDb.ref('teamquest/' + code); },
+  async load(code) {
+    try {
+      const snap = await this.ref(code).get();
+      return snap.exists() ? snap.val() : null;
+    } catch (e) {
+      console.error('TeamQuest: Laden fehlgeschlagen', e);
+      return null;
+    }
+  },
+  save(code, state) {
+    try {
+      const payload = Object.assign({}, state, { _meta: { updatedBy: CLIENT_ID, updatedAt: Date.now() } });
+      this.ref(code).set(payload).catch(e => console.error('TeamQuest: Speichern fehlgeschlagen', e));
+      return true;
+    } catch (e) {
+      console.error('TeamQuest: Speichern fehlgeschlagen', e);
+      return false;
+    }
+  },
+  // Live-Abo: feuert bei jeder Änderung am Pfad (eigene Schreibvorgänge ausgenommen).
+  subscribe(code, onChange) {
+    const handler = (snap) => {
+      const data = snap.val();
+      if (!data) return;
+      if (data._meta && data._meta.updatedBy === CLIENT_ID) return; // eigenes Echo ignorieren
+      onChange(data);
+    };
+    this.ref(code).on('value', handler);
+    return () => this.ref(code).off('value', handler);
+  }
+};
+
+/* ============================================================
+   4. INITIALER STATE
+   ============================================================ */
+
+function freshProfile(overrides) {
+  return Object.assign({
+    id: uid('profile'),
+    name: '',
+    icon: ANIMAL_ICONS[0],
+    color: PROFILE_COLORS[0],
+    classKey: 'krieger',
+    level: 1,
+    xp: 0,
+    gold: 0,
+    questProgress: {},   // { 'YYYY-MM-DD': { questId: 'kurz' | 'komplett' } }
+    actionsToday: { date: null, count: 0 },   // verdiente Kampf-Aktionen heute (durch Quests)
+    actionsSpent: { date: null, count: 0 },   // davon bereits für Fähigkeiten eingesetzte Aktionen
+    actionsGrantedFor: {},                     // { 'YYYY-MM-DD': { questId: true } } — verhindert doppelte Aktionen durch kurz->komplett
+    cooldowns: {},        // { abilityId: 'YYYY-MM-DD' (zuletzt benutzt) }
+    inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
+    calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
+    questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 40/Tag, +5 pro abgeschlossener 20XP-Quest)
+  }, overrides || {});
+}
+
+function initialState() {
+  return {
+    profiles: [],
+    activeProfileId: null,
+    quests: DEFAULT_QUESTS.slice(),
+    questCategories: DEFAULT_QUEST_CATEGORIES.slice(),
+    shop: { gemeinsam: SHOP_GEMEINSAM.slice(), geschenk: SHOP_GESCHENK.slice() },
+    sharedInventory: [],
+    combat: {
+      bossTier: 0,
+      bossHp: BOSS_TIERS[0].hp,
+      teamHp: null,        // wird beim ersten Laden mit 2 Profilen berechnet
+      pendingShield: 0,
+      bleeds: [],           // [{ remaining, dmg }]
+      actionsTodayDate: null,
+      actionsTodayCount: 0,
+    },
+    pendingConfirmations: [], // [{ id, category, itemId, title, cost, buyerId, partnerId, buyerPaid, partnerPaid }]
+    log: [],                  // [{ id, ts, text }]
+    calendarItems: [],        // [{ id, kind: 'aufgabe'|'termin', title, icon, date, recurrence, carryForward, occurrences }]
+  };
+}
+
+/* ============================================================
+   4b. MIGRATION ALTER GESPEICHERTER DATEN
+   ------------------------------------------------------------
+   Wenn die App schon vor einem Feature-Update benutzt wurde, fehlen im
+   gespeicherten Stand neuere Felder (z. B. questCategories). Diese
+   Funktion rüstet sie defensiv nach, damit alte Spielstände nicht zum
+   Absturz führen.
+   ============================================================ */
+
+function migrateState(loaded) {
+  if (!loaded) return null;
+  const base = initialState();
+  const merged = Object.assign({}, base, loaded);
+
+  // Kategorien-Liste nachrüsten, falls aus einer Vor-Kategorien-Version geladen.
+  if (!Array.isArray(merged.questCategories) || merged.questCategories.length === 0) {
+    merged.questCategories = DEFAULT_QUEST_CATEGORIES.slice();
+  }
+
+  // Jeder Quest eine Kategorie zuordnen, falls sie (aus einer alten Version) fehlt.
+  let quests = (Array.isArray(merged.quests) ? merged.quests : DEFAULT_QUESTS.slice()).map(q => {
+    if (q.category) return q;
+    const match = DEFAULT_QUESTS.find(dq => dq.id === q.id);
+    return Object.assign({}, q, { category: match ? match.category : 'Sonstiges' });
+  });
+
+  // "Bonus-Aufgabe" wurde bewusst entfernt — falls noch aus einem alten Stand vorhanden, raus damit.
+  quests = quests.filter(q => q.title !== 'Bonus-Aufgabe');
+
+  // Neue Standard-Quests (z. B. aus einem späteren Feature-Update) ergänzen,
+  // die im alten gespeicherten Stand noch fehlen — eigene/angepasste Quests bleiben unangetastet.
+  const existingIds = new Set(quests.map(q => q.id));
+  DEFAULT_QUESTS.forEach(dq => {
+    if (!existingIds.has(dq.id)) quests.push(Object.assign({}, dq));
+  });
+  merged.quests = quests;
+
+  const usedCategories = new Set(merged.quests.map(q => q.category));
+  usedCategories.forEach(c => { if (!merged.questCategories.includes(c)) merged.questCategories.push(c); });
+
+  if (!Array.isArray(merged.calendarItems)) merged.calendarItems = [];
+
+  // Shop-Katalog: neue Standard-Items (Erweiterung) ergänzen, die im alten
+  // gespeicherten Stand noch fehlen — eigene/angepasste Items bleiben unangetastet.
+  if (!merged.shop || typeof merged.shop !== 'object') merged.shop = { gemeinsam: [], geschenk: [] };
+  ['gemeinsam', 'geschenk'].forEach(cat => {
+    const defaults = cat === 'gemeinsam' ? SHOP_GEMEINSAM : SHOP_GESCHENK;
+    const list = Array.isArray(merged.shop[cat]) ? merged.shop[cat] : [];
+    const existingIds = new Set(list.map(i => i.id));
+    defaults.forEach(d => { if (!existingIds.has(d.id)) list.push(Object.assign({}, d)); });
+    merged.shop[cat] = list;
+  });
+  // Filmabend-Preis wurde bewusst von 60 auf 50 angepasst — nur überschreiben,
+  // falls noch der alte Default-Wert vorliegt (keine eigene Anpassung überschreiben).
+  const filmabend = merged.shop.gemeinsam.find(i => i.id === 's1');
+  if (filmabend && filmabend.cost === 60) filmabend.cost = 50;
+
+  // Profile: fehlende neuere Felder (actionsSpent, actionsGrantedFor, ...) aus freshProfile() auffüllen.
+  merged.profiles = (Array.isArray(merged.profiles) ? merged.profiles : []).map(p => Object.assign(freshProfile(), p));
+
+  // Combat-Unterobjekt defensiv zusammenführen, falls dort künftig neue Felder dazukommen.
+  merged.combat = Object.assign({}, base.combat, loaded.combat || {});
+
+  return merged;
+}
+
+/* ============================================================
+   5. SPIEL-LOGIK
+   ============================================================ */
+
+function getClass(profile) { return CLASSES[profile.classKey] || CLASSES.krieger; }
+
+function teamHpMax(state) {
+  if (state.profiles.length < 2) return 0;
+  const [a, b] = state.profiles;
+  return getClass(a).teamHp + getClass(b).teamHp;
+}
+
+function getActionsEarnedToday(profile) {
+  const today = todayBerlin();
+  return profile.actionsToday && profile.actionsToday.date === today ? profile.actionsToday.count : 0;
+}
+
+function getActionsSpentToday(profile) {
+  const today = todayBerlin();
+  return profile.actionsSpent && profile.actionsSpent.date === today ? profile.actionsSpent.count : 0;
+}
+
+// Verdiente, aber noch nicht für eine Fähigkeit eingesetzte Aktionen.
+function getAvailableActions(profile) {
+  return Math.max(0, getActionsEarnedToday(profile) - getActionsSpentToday(profile));
+}
+
+function unlockedAbilities(profile) {
+  const cls = getClass(profile);
+  const today = todayBerlin();
+  return cls.abilities
+    .filter(a => profile.level >= a.unlockLevel)
+    .map(a => {
+      const onCooldown = a.cooldownDays && profile.cooldowns && profile.cooldowns[a.id] === today;
+      return Object.assign({}, a, { onCooldown });
+    });
+}
+
+function questStageXp(quest, stage) {
+  if (stage === 'komplett') return quest.xp;
+  if (stage === 'kurz') return Math.round(quest.xp * 0.4);
+  return 0;
+}
+
+// Tagesdeckel für Quest-XP: Basis 40, +5 für jede an diesem Tag komplett
+// abgeschlossene "schwere" Quest (20 XP). Wird aus dem ohnehin vorhandenen
+// questProgress berechnet, statt separat mitgezählt zu werden.
+function getQuestXpCapToday(state, profile, today) {
+  const progress = profile.questProgress[today] || {};
+  const hardQuestsDone = Object.keys(progress).filter(qId => {
+    if (progress[qId] !== 'komplett') return false;
+    const quest = state.quests.find(q => q.id === qId);
+    return quest && quest.xp === QUEST_HARD_XP_THRESHOLD;
+  }).length;
+  return QUEST_XP_DAILY_BASE_CAP + hardQuestsDone * QUEST_XP_CAP_BONUS_PER_HARD_QUEST;
+}
+
+function getQuestXpEarnedToday(profile) {
+  const today = todayBerlin();
+  return profile.questXpToday && profile.questXpToday.date === today ? profile.questXpToday.amount : 0;
+}
+
+function addLog(state, text) {
+  state.log = [{ id: uid('log'), ts: Date.now(), text }, ...state.log].slice(0, 60);
+}
+
+// Vergibt XP an ein Profil, behandelt dabei Level-Ups (auch mehrfach in Folge).
+function grantXp(profile, amount) {
+  profile.xp += amount;
+  while (profile.xp >= xpForLevel(profile.level)) {
+    profile.xp -= xpForLevel(profile.level);
+    profile.level += 1;
+  }
+}
+
+/* ----- Kalender: Aufgaben & Termine ----- */
+
+function addDaysToDateStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function daysBetweenDateStrs(a, b) {
+  const da = new Date(a + 'T00:00:00');
+  const db = new Date(b + 'T00:00:00');
+  return Math.round((db - da) / 86400000);
+}
+
+// Mo=0 .. So=6, passend zur bestehenden Konvention im Kalender-Grid.
+function weekdayOfDateStr(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return (d.getDay() + 6) % 7;
+}
+
+function formatShortDate(dateStr) {
+  const [, m, d] = dateStr.split('-');
+  return `${d}.${m}.`;
+}
+
+function weekdayLabelFor(dateStr) {
+  return WEEKDAY_LABELS[weekdayOfDateStr(dateStr)];
+}
+
+// Berechnet alle geplanten Vorkommen eines Kalender-Eintrags innerhalb [fromDate, toDate],
+// basierend auf der Wiederholungsregel (oder einmalig, falls keine Regel gesetzt ist).
+function getOccurrencesInRange(item, fromDate, toDate) {
+  if (!item.date || fromDate > toDate) return [];
+  const rec = item.recurrence;
+  const results = [];
+
+  if (!rec) {
+    if (item.date >= fromDate && item.date <= toDate) results.push(item.date);
+    return results;
+  }
+
+  if (rec.type === 'weekly') {
+    let cursor = item.date > fromDate ? item.date : fromDate;
+    let guard = 0;
+    while (cursor <= toDate && guard < 730) {
+      if (cursor >= item.date && rec.weekdays.includes(weekdayOfDateStr(cursor))) {
+        results.push(cursor);
+      }
+      cursor = addDaysToDateStr(cursor, 1);
+      guard++;
+    }
+  } else if (rec.type === 'monthly') {
+    let [y, m] = fromDate.split('-').map(Number);
+    const [toY, toM] = toDate.split('-').map(Number);
+    let guard = 0;
+    while ((y < toY || (y === toY && m <= toM)) && guard < 120) {
+      const lastDay = new Date(y, m, 0).getDate();
+      const day = Math.min(rec.day, lastDay);
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      if (dateStr >= item.date && dateStr >= fromDate && dateStr <= toDate) results.push(dateStr);
+      m += 1;
+      if (m > 12) { m = 1; y += 1; }
+      guard++;
+    }
+  } else if (rec.type === 'yearly') {
+    let [y] = fromDate.split('-').map(Number);
+    const toY = Number(toDate.split('-')[0]);
+    let guard = 0;
+    while (y <= toY + 1 && guard < 50) {
+      const lastDay = new Date(y, rec.month, 0).getDate();
+      const day = Math.min(rec.day, lastDay);
+      const dateStr = `${y}-${String(rec.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      if (dateStr >= item.date && dateStr >= fromDate && dateStr <= toDate) results.push(dateStr);
+      y += 1;
+      guard++;
+    }
+  }
+  return results;
+}
+
+function isOccurrenceDone(item, scheduledDate) {
+  return !!(item.occurrences && item.occurrences[scheduledDate] && item.occurrences[scheduledDate].done);
+}
+
+// Effektives Datum eines Vorkommens: Termine verschieben sich nie. Aufgaben mit
+// "Mitnehmen" rutschen auf "heute", solange sie nicht erledigt sind. Ohne
+// "Mitnehmen" bleiben sie an ihrem ursprünglichen Tag stehen.
+function getEffectiveDate(item, scheduledDate, today) {
+  if (item.kind !== 'aufgabe') return scheduledDate;
+  if (isOccurrenceDone(item, scheduledDate)) return scheduledDate;
+  if (item.carryForward && scheduledDate < today) return today;
+  return scheduledDate;
+}
+
+function overdueDaysFor(item, scheduledDate, today) {
+  if (item.kind !== 'aufgabe' || isOccurrenceDone(item, scheduledDate) || scheduledDate >= today) return 0;
+  return daysBetweenDateStrs(scheduledDate, today);
+}
+
+// Agenda für einen beliebigen Tag `day` (kann heute, in der Vergangenheit oder
+// Zukunft liegen): alles, was an diesem Tag fällig ist (inkl. mitgenommener
+// überfälliger Aufgaben, die heute landen) sowie alles, was an diesem Tag
+// tatsächlich erledigt wurde. `today` bleibt für Mitnehmen-/Überfällig-Logik
+// immer das echte heutige Datum, unabhängig von `day`.
+function getDayAgenda(state, day, today) {
+  const out = [];
+  const scanTo = day > today ? day : today;
+  (state.calendarItems || []).forEach(item => {
+    getOccurrencesInRange(item, item.date, scanTo).forEach(sched => {
+      const occ = item.occurrences && item.occurrences[sched];
+      const done = !!(occ && occ.done);
+      if (done) {
+        if (occ.doneDate === day) out.push({ item, scheduledDate: sched, done: true, overdue: 0 });
+        return;
+      }
+      const eff = getEffectiveDate(item, sched, today);
+      if (eff === day) {
+        out.push({ item, scheduledDate: sched, done: false, overdue: overdueDaysFor(item, sched, today) });
+      }
+    });
+  });
+  return out;
+}
+
+// Heutige Agenda (Spezialfall von getDayAgenda mit day = today) — bleibt für
+// den Quests-Tab unverändert immer an das echte heutige Datum gebunden.
+function getTodayAgenda(state, today) {
+  return getDayAgenda(state, today, today);
+}
+
+// Vorschau der nächsten `daysAhead` Tage (rein informativ, nicht abhakbar).
+function getUpcomingAgenda(state, today, daysAhead) {
+  const fromDate = addDaysToDateStr(today, 1);
+  const toDate = addDaysToDateStr(today, daysAhead);
+  const out = [];
+  (state.calendarItems || []).forEach(item => {
+    getOccurrencesInRange(item, fromDate, toDate).forEach(sched => {
+      out.push({ item, scheduledDate: sched, done: isOccurrenceDone(item, sched) });
+    });
+  });
+  out.sort((a, b) => (a.scheduledDate < b.scheduledDate ? -1 : a.scheduledDate > b.scheduledDate ? 1 : 0));
+  return out;
+}
+
+// Ordnet alle Vorkommen im sichtbaren Monat ihrem tatsächlichen Anzeige-Tag zu:
+// erledigte Aufgaben erscheinen am Tag, an dem sie ERLEDIGT wurden (nicht am
+// ursprünglich geplanten Tag) — offene Aufgaben/Termine am effektiven Tag
+// (heute, falls mitgenommen und überfällig; sonst am geplanten Tag).
+function getMonthAgenda(state, monthStart, monthEnd, today) {
+  const byDate = {};
+  const scanTo = monthEnd > today ? monthEnd : today;
+  (state.calendarItems || []).forEach(item => {
+    getOccurrencesInRange(item, item.date, scanTo).forEach(sched => {
+      const occ = item.occurrences && item.occurrences[sched];
+      const done = !!(occ && occ.done);
+      const displayDate = done ? occ.doneDate : getEffectiveDate(item, sched, today);
+      if (displayDate >= monthStart && displayDate <= monthEnd) {
+        (byDate[displayDate] = byDate[displayDate] || []).push({ item, scheduledDate: sched, done });
+      }
+    });
+  });
+  return byDate;
+}
+
+// Protokoll: alle jemals erledigten Aufgaben-Vorkommen, neueste zuerst (nach Erledigungs-Datum).
+function getCompletionLog(state, limit) {
+  const out = [];
+  (state.calendarItems || []).forEach(item => {
+    if (item.kind !== 'aufgabe' || !item.occurrences) return;
+    Object.keys(item.occurrences).forEach(sched => {
+      const occ = item.occurrences[sched];
+      if (occ && occ.done && occ.doneDate) {
+        out.push({ item, scheduledDate: sched, doneDate: occ.doneDate, doneBy: occ.doneBy });
+      }
+    });
+  });
+  out.sort((a, b) => (a.doneDate < b.doneDate ? 1 : a.doneDate > b.doneDate ? -1 : 0));
+  return typeof limit === 'number' ? out.slice(0, limit) : out;
+}
+
+function getCalendarXpEarnedToday(profile) {
+  const today = todayBerlin();
+  return profile.calendarXpToday && profile.calendarXpToday.date === today ? profile.calendarXpToday.amount : 0;
+}
+
+// Aufgabe (nicht Termin) als erledigt markieren. Gibt 5 XP, gedeckelt bei 10 XP/Tag
+// pro Profil; darüber hinaus wird trotzdem als erledigt protokolliert (nur ohne XP).
+function completeCalendarItem(state, profileId, itemId, scheduledDate) {
+  const item = (state.calendarItems || []).find(i => i.id === itemId);
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (!item || !profile || item.kind !== 'aufgabe') return { xpGained: 0 };
+  if (!item.occurrences) item.occurrences = {};
+  if (item.occurrences[scheduledDate] && item.occurrences[scheduledDate].done) return { xpGained: 0 };
+
+  const today = todayBerlin();
+  if (!profile.calendarXpToday || profile.calendarXpToday.date !== today) {
+    profile.calendarXpToday = { date: today, amount: 0 };
+  }
+  const headroom = Math.max(0, CALENDAR_XP_DAILY_CAP - profile.calendarXpToday.amount);
+  const gained = Math.min(CALENDAR_XP_PER_TASK, headroom);
+
+  item.occurrences[scheduledDate] = { done: true, doneDate: today, doneBy: profile.id };
+  if (gained > 0) {
+    grantXp(profile, gained);
+    profile.calendarXpToday.amount += gained;
+  }
+  addLog(state, gained > 0
+    ? `📅 ${profile.name} erledigt „${item.title}" — +${gained} XP.`
+    : `📅 ${profile.name} erledigt „${item.title}" (Tages-XP-Limit erreicht).`);
+  return { xpGained: gained };
+}
+
+// Schadens-/Heileffekt auf den Boss anwenden, inkl. Sieg-Check.
+// Gibt zurück, ob der Boss in diesem Schritt besiegt wurde.
+function dealBossDamage(state, amount) {
+  state.combat.bossHp = Math.max(0, state.combat.bossHp - amount);
+  if (state.combat.bossHp <= 0) {
+    defeatBoss(state);
+    return true;
+  }
+  return false;
+}
+
+function defeatBoss(state) {
+  const stats = bossStatsForTier(state.combat.bossTier);
+  state.profiles.forEach(p => { p.gold += stats.gold; });
+  addLog(state, `🏆 ${bossDisplayName(state.combat.bossTier)} besiegt! Jeder erhält ${stats.gold} Gold.`);
+  state.combat.bossTier += 1;
+  const next = bossStatsForTier(state.combat.bossTier);
+  state.combat.bossHp = next.hp;
+  state.combat.teamHp = teamHpMax(state);
+  state.combat.pendingShield = 0;
+  state.combat.bleeds = [];
+}
+
+// Schaden auf die Team-HP anwenden, inkl. "Boss heilt sich bei 0 HP"-Regel.
+function dealTeamDamage(state, amount) {
+  const reduced = Math.max(0, amount - state.combat.pendingShield);
+  if (state.combat.pendingShield > 0) {
+    addLog(state, `🛡️ Schild reduziert den Gegenangriff um ${Math.min(amount, state.combat.pendingShield)}.`);
+    state.combat.pendingShield = 0;
+  }
+  state.combat.teamHp = Math.max(0, state.combat.teamHp - reduced);
+  if (reduced > 0) addLog(state, `💥 Gegenangriff: -${reduced} Team-HP.`);
+  if (state.combat.teamHp <= 0) {
+    const stats = bossStatsForTier(state.combat.bossTier);
+    const healAmount = Math.round(stats.hp * 0.15);
+    state.combat.bossHp = Math.min(stats.hp, state.combat.bossHp + healAmount);
+    state.combat.teamHp = teamHpMax(state);
+    addLog(state, `☠️ Team-HP auf 0 gefallen — der Boss heilt sich um ${healAmount} HP, eure Team-HP wird komplett aufgefüllt.`);
+  }
+}
+
+function tickBleeds(state) {
+  if (!state.combat.bleeds.length) return;
+  let totalTick = 0;
+  state.combat.bleeds = state.combat.bleeds.filter(b => {
+    totalTick += b.dmg;
+    b.remaining -= 1;
+    return b.remaining > 0;
+  });
+  if (totalTick > 0) {
+    addLog(state, `🩸 Blutung: ${totalTick} Schaden am Boss.`);
+    dealBossDamage(state, totalTick);
+  }
+}
+
+// Eine Fähigkeit einsetzen (kostet eine der heute verdienten, noch nicht
+// verbrauchten Kampf-Aktionen). Wird jetzt direkt im Kampf-Tab ausgelöst,
+// nicht mehr automatisch nach Quest-Abschluss.
+function useAbility(state, profileId, abilityId) {
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (!profile) return { ok: false, reason: 'unknown' };
+  const cls = getClass(profile);
+  const ability = cls.abilities.find(a => a.id === abilityId);
+  if (!ability) return { ok: false, reason: 'unknown' };
+
+  if (profile.level < ability.unlockLevel) return { ok: false, reason: 'locked' };
+
+  const today = todayBerlin();
+  if (ability.cooldownDays && profile.cooldowns && profile.cooldowns[ability.id] === today) {
+    return { ok: false, reason: 'cooldown' };
+  }
+  if (getAvailableActions(profile) <= 0) return { ok: false, reason: 'no_actions' };
+
+  // Aktion verbrauchen.
+  if (!profile.actionsSpent || profile.actionsSpent.date !== today) profile.actionsSpent = { date: today, count: 0 };
+  profile.actionsSpent.count += 1;
+
+  // Blutungs-Ticks aus VORHERIGEN Aktionen zuerst auflösen.
+  tickBleeds(state);
+  if (state.combat.bossHp <= 0) return { ok: true }; // Boss ist durch die Blutung gerade gefallen
+
+  if (ability.cooldownDays) {
+    profile.cooldowns = profile.cooldowns || {};
+    profile.cooldowns[ability.id] = today;
+  }
+
+  let defeated = false;
+  switch (ability.kind) {
+    case 'damage': {
+      const dmg = rollVariance(ability.value);
+      addLog(state, `⚔️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden.`);
+      defeated = dealBossDamage(state, dmg);
+      break;
+    }
+    case 'damage_bleed': {
+      const dmg = rollVariance(ability.value);
+      addLog(state, `🩸 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden + Blutung.`);
+      defeated = dealBossDamage(state, dmg);
+      if (!defeated) state.combat.bleeds.push({ remaining: ability.bleedTicks, dmg: ability.bleedValue });
+      break;
+    }
+    case 'shield': {
+      state.combat.pendingShield = Math.max(state.combat.pendingShield, ability.shieldValue);
+      addLog(state, `🛡️ ${profile.name} setzt ${ability.name} ein: nächster Gegenangriff -${ability.shieldValue}.`);
+      break;
+    }
+    case 'damage_shield': {
+      const dmg = rollVariance(ability.value);
+      state.combat.pendingShield = Math.max(state.combat.pendingShield, ability.shieldValue);
+      addLog(state, `❄️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden, nächster Gegenangriff -${ability.shieldValue}.`);
+      defeated = dealBossDamage(state, dmg);
+      break;
+    }
+    case 'damage_selfhurt': {
+      const dmg = rollVariance(ability.value);
+      addLog(state, `💢 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden, kostet ${ability.selfHurt} Team-HP.`);
+      defeated = dealBossDamage(state, dmg);
+      if (!defeated) dealTeamDamage(state, ability.selfHurt);
+      break;
+    }
+    case 'heal': {
+      const before = state.combat.teamHp;
+      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.value);
+      addLog(state, `✨ ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Team-HP.`);
+      break;
+    }
+    case 'damage_heal': {
+      const dmg = rollVariance(ability.value);
+      const before = state.combat.teamHp;
+      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.healValue);
+      addLog(state, `🙏 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden + ${state.combat.teamHp - before} Heilung.`);
+      defeated = dealBossDamage(state, dmg);
+      break;
+    }
+    case 'random_damage_heal': {
+      if (Math.random() < 0.5) {
+        const before = state.combat.teamHp;
+        state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.value);
+        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Heilung.`);
+      } else {
+        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: ${ability.value} Schaden.`);
+        defeated = dealBossDamage(state, ability.value);
+      }
+      break;
+    }
+  }
+
+  if (!defeated) {
+    // Gegenangriff-Timing: alle 2 kumulierte Aktionen (über beide Profile).
+    if (state.combat.actionsTodayDate !== today) {
+      state.combat.actionsTodayDate = today;
+      state.combat.actionsTodayCount = 0;
+    }
+    state.combat.actionsTodayCount += 1;
+    if (state.combat.actionsTodayCount % 2 === 0) {
+      dealTeamDamage(state, counterDamageForTier(state.combat.bossTier));
+    }
+  }
+
+  return { ok: true };
+}
+
+// Eine Quest-Stufe abschließen. Gibt zurück, ob dadurch eine Kampf-Aktion frei wurde.
+function completeQuestStage(state, profileId, questId, stage) {
+  const profile = state.profiles.find(p => p.id === profileId);
+  const quest = state.quests.find(q => q.id === questId);
+  if (!profile || !quest) return { xpGained: 0, actionGranted: false, leveledUp: false };
+
+  const today = todayBerlin();
+  if (!profile.questProgress[today]) profile.questProgress[today] = {};
+  const currentStage = profile.questProgress[today][questId] || null;
+
+  const stageOrder = { kurz: 1, komplett: 2 };
+  if (currentStage && stageOrder[currentStage] >= stageOrder[stage]) {
+    return { xpGained: 0, actionGranted: false, leveledUp: false, alreadyDone: true };
+  }
+
+  const before = currentStage ? questStageXp(quest, currentStage) : 0;
+  const after = questStageXp(quest, stage);
+  const delta = after - before;
+
+  // Fortschritt zuerst eintragen: falls DIESE Stufe eine "schwere" (20XP-)Quest
+  // komplett macht, zählt die Deckel-Erhöhung dadurch bereits für die XP-Vergabe
+  // dieser selben Quest mit.
+  profile.questProgress[today][questId] = stage;
+
+  if (!profile.questXpToday || profile.questXpToday.date !== today) {
+    profile.questXpToday = { date: today, amount: 0 };
+  }
+  const cap = getQuestXpCapToday(state, profile, today);
+  const headroom = Math.max(0, cap - profile.questXpToday.amount);
+  const gained = Math.min(delta, headroom);
+
+  const levelBefore = profile.level;
+  grantXp(profile, gained);
+  profile.questXpToday.amount += gained;
+  addLog(state, `📜 ${profile.name}: "${quest.title}" (${stage === 'kurz' ? 'kurz begonnen' : 'komplett'}) — +${gained} XP${gained < delta ? ' (Tages-XP-Limit erreicht)' : ''}.`);
+
+  // Eine Quest darf pro Tag nur EINE Kampf-Aktion auslösen — auch wenn sie
+  // erst "kurz" und später am selben Tag "komplett" abgeschlossen wird.
+  if (!profile.actionsGrantedFor) profile.actionsGrantedFor = {};
+  if (!profile.actionsGrantedFor[today]) profile.actionsGrantedFor[today] = {};
+  const alreadyGrantedForQuest = !!profile.actionsGrantedFor[today][questId];
+
+  if (profile.actionsToday.date !== today) profile.actionsToday = { date: today, count: 0 };
+  let actionGranted = false;
+  if (!alreadyGrantedForQuest && profile.actionsToday.count < MAX_ACTIONS_PER_DAY) {
+    profile.actionsToday.count += 1;
+    profile.actionsGrantedFor[today][questId] = true;
+    actionGranted = true;
+  }
+
+  return { xpGained: gained, actionGranted, leveledUp: profile.level > levelBefore };
+}
+
+/* ============================================================
+   6. KLEINE UI-BAUSTEINE
+   ============================================================ */
+
+function Bar({ value, max, colorClass, low }) {
+  const pct = max > 0 ? clamp((value / max) * 100, 0, 100) : 0;
+  return (
+    <div className={`bar-track ${low ? 'bar-low' : ''}`}>
+      <div className={`bar-fill ${colorClass}`} style={{ width: pct + '%' }}></div>
+    </div>
+  );
+}
+
+function ProfileAvatar({ profile, size }) {
+  const s = size || 48;
+  return (
+    <div
+      className="rounded-full flex items-center justify-center border-2 shrink-0"
+      style={{ width: s, height: s, background: profile.color + '33', borderColor: profile.color, fontSize: s * 0.5 }}
+    >
+      {profile.icon}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children, wide }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 px-3 pb-3 sm:p-4" onClick={onClose}>
+      <div
+        className={`pop-in bg-bgElevated border border-border rounded-2xl w-full ${wide ? 'sm:max-w-lg' : 'sm:max-w-sm'} max-h-[85vh] overflow-y-auto`}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-bgElevated">
+          <h3 className="font-display font-bold text-gold text-lg">{title}</h3>
+          <button onClick={onClose} className="text-inkDim hover:text-ink text-xl leading-none px-2 py-1">✕</button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function ToastStack({ toasts }) {
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[60] flex flex-col items-center gap-2 px-3 pt-3 pointer-events-none">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast-in pointer-events-auto px-4 py-2 rounded-xl border text-sm font-medium shadow-lg ${
+          t.type === 'levelup' ? 'bg-gold text-bg border-goldBright' :
+          t.type === 'error' ? 'bg-hp/90 text-ink border-hp' :
+          'bg-surface2 text-ink border-border'
+        }`}>
+          {t.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SectionLabel({ children }) {
+  return <div className="font-display text-xs tracking-widest uppercase text-inkDim mb-2">{children}</div>;
+}
+
+/* ----- Kalender: Aufgaben & Termine — UI ----- */
+
+function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose }) {
+  const isEdit = !!editingItem;
+  const [kind, setKind] = useState(editingItem ? editingItem.kind : 'aufgabe');
+  const [title, setTitle] = useState(editingItem ? editingItem.title : '');
+  const [date, setDate] = useState(editingItem ? editingItem.date : defaultDate);
+  const [icon, setIcon] = useState(editingItem ? editingItem.icon : '📌');
+  const [recurType, setRecurType] = useState(editingItem && editingItem.recurrence ? editingItem.recurrence.type : 'none');
+  const [weekdays, setWeekdays] = useState(editingItem && editingItem.recurrence && editingItem.recurrence.type === 'weekly' ? editingItem.recurrence.weekdays : []);
+  const [carryForward, setCarryForward] = useState(editingItem ? !!editingItem.carryForward : true);
+
+  function toggleWeekday(i) {
+    setWeekdays(w => (w.includes(i) ? w.filter(x => x !== i) : [...w, i].sort()));
+  }
+
+  const canSave = title.trim().length > 0 && !!date && (recurType !== 'weekly' || weekdays.length > 0);
+
+  function buildRecurrence() {
+    if (recurType === 'none') return null;
+    if (recurType === 'weekly') return { type: 'weekly', weekdays };
+    if (recurType === 'monthly') return { type: 'monthly', day: Number(date.split('-')[2]) };
+    if (recurType === 'yearly') {
+      const [, m, d] = date.split('-').map(Number);
+      return { type: 'yearly', month: m, day: d };
+    }
+    return null;
+  }
+
+  function handleSave() {
+    onSave({
+      id: editingItem ? editingItem.id : undefined,
+      kind,
+      title: title.trim(),
+      date,
+      icon: icon.trim() || (kind === 'aufgabe' ? '📌' : '📅'),
+      recurrence: buildRecurrence(),
+      carryForward: kind === 'aufgabe' ? carryForward : false,
+    });
+  }
+
+  return (
+    <Modal title={isEdit ? 'Aufgabe / Termin bearbeiten' : 'Neue Aufgabe / Termin'} onClose={onClose} wide>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Typ</SectionLabel>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => setKind('aufgabe')}
+              className={`rounded-xl border-2 py-2.5 text-sm font-semibold ${kind === 'aufgabe' ? 'border-gold bg-gold/10 text-gold' : 'border-border bg-surface text-inkDim'}`}>
+              ✅ Aufgabe
+            </button>
+            <button onClick={() => setKind('termin')}
+              className={`rounded-xl border-2 py-2.5 text-sm font-semibold ${kind === 'termin' ? 'border-shield bg-shield/10 text-shield' : 'border-border bg-surface text-inkDim'}`}>
+              📅 Termin
+            </button>
+          </div>
+          <div className="text-[10px] text-inkDim mt-1.5">
+            {kind === 'aufgabe' ? 'Kann abgehakt werden, gibt XP.' : 'Reine Erinnerung, ohne Erledigt-Status.'}
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Titel</SectionLabel>
+          <input value={title} onChange={e => setTitle(e.target.value)} maxLength={60} placeholder="z. B. Zahnarzttermin"
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink placeholder-inkDim/60" />
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <SectionLabel>Datum</SectionLabel>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
+          </div>
+          <div>
+            <SectionLabel>Icon</SectionLabel>
+            <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+              className="w-16 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Wiederholung</SectionLabel>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[['none', 'Einmalig'], ['weekly', 'Wochentag'], ['monthly', 'Monatlich'], ['yearly', 'Jährlich']].map(([key, label]) => (
+              <button key={key} onClick={() => setRecurType(key)}
+                className={`text-[11px] rounded-lg border py-2 ${recurType === key ? 'bg-gold text-bg border-gold font-semibold' : 'bg-surface border-border text-inkDim'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {recurType === 'weekly' && (
+            <div className="grid grid-cols-7 gap-1 mt-2">
+              {WEEKDAY_LABELS.map((lbl, i) => (
+                <button key={i} onClick={() => toggleWeekday(i)}
+                  className={`text-[10px] rounded-lg border py-2 ${weekdays.includes(i) ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          )}
+          {recurType === 'monthly' && date && (
+            <div className="text-[11px] text-inkDim mt-2">Wiederholt sich am {date.split('-')[2]}. jedes Monats.</div>
+          )}
+          {recurType === 'yearly' && date && (
+            <div className="text-[11px] text-inkDim mt-2">Wiederholt sich jedes Jahr am {formatShortDate(date)}</div>
+          )}
+        </div>
+        {kind === 'aufgabe' && (
+          <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+            <div className="pr-3">
+              <div className="text-sm text-ink">Nicht erledigt mitnehmen</div>
+              <div className="text-[10px] text-inkDim">Rutscht automatisch auf "heute" weiter, statt liegen zu bleiben.</div>
+            </div>
+            <button onClick={() => setCarryForward(c => !c)}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${carryForward ? 'bg-gold' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${carryForward ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+        )}
+        <button disabled={!canSave} onClick={handleSave}
+          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
+          {isEdit ? 'Speichern' : 'Hinzufügen'}
+        </button>
+        {isEdit && (
+          <button onClick={() => onDelete(editingItem.id)}
+            className="w-full border border-hp/40 text-hp text-sm rounded-xl py-2.5 active:scale-[0.98] transition-transform">
+            🗑️ Löschen
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function AgendaItemRow({ entry, onComplete, onEdit, actionable, showDate }) {
+  const { item, scheduledDate, done, overdue } = entry;
+  const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
+  const escalated = overdue >= 7 ? 'hp' : overdue >= 3 ? 'orange' : null;
+
+  return (
+    <div className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
+      done ? 'border-border bg-surface/40 opacity-60' :
+      escalated === 'hp' ? 'border-hp/60 bg-hp/5' :
+      escalated === 'orange' ? 'border-orange/60 bg-orange/5' :
+      'border-border bg-surface'
+    } ${grayedOut ? 'opacity-50' : ''}`}>
+      <button onClick={() => onEdit(item)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left active:opacity-70">
+        <span className="text-lg shrink-0">{item.icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className={`text-sm truncate ${done ? 'line-through text-inkDim' : 'text-ink'}`}>{item.title}</div>
+          <div className="text-[10px] text-inkDim flex items-center gap-1.5 flex-wrap">
+            <span>{item.kind === 'termin' ? 'Termin' : 'Aufgabe'}</span>
+            {showDate && <span>· {formatShortDate(scheduledDate)} {weekdayLabelFor(scheduledDate)}</span>}
+            {grayedOut && <span>· nicht erledigt</span>}
+            {overdue > 0 && (
+              <span className={escalated === 'hp' ? 'text-hp font-semibold' : 'text-orange font-semibold'}>
+                · {overdue} {overdue === 1 ? 'Tag' : 'Tage'} überfällig
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+      {item.kind === 'aufgabe' && !done && actionable && (
+        <button onClick={() => onComplete(item.id, scheduledDate)}
+          className="text-xs font-semibold rounded-lg px-2.5 py-2 border border-heal/50 bg-heal/10 text-heal shrink-0 active:scale-95 transition-transform">
+          ✓ Fertig
+        </button>
+      )}
+      {done && <span className="text-heal text-base shrink-0 pr-1">✓</span>}
+    </div>
+  );
+}
+
+function TodayAgendaCard({ entries, onComplete, onEdit, onAddClick }) {
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <SectionLabel>📅 Heute</SectionLabel>
+        <button onClick={onAddClick} className="text-xs text-gold font-semibold">+ Hinzufügen</button>
+      </div>
+      {entries.length === 0 ? (
+        <div className="text-xs text-inkDim">Keine Aufgaben oder Termine heute.</div>
+      ) : (
+        <div className="space-y-2">
+          {entries.map(entry => (
+            <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+              onComplete={onComplete} onEdit={onEdit} actionable showDate={false} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DateHeading({ dateStr }) {
+  return (
+    <div className="flex items-baseline gap-1.5 mb-1.5 pb-1 border-b border-border/60">
+      <span className="text-xs font-display font-bold text-gold">{formatShortDate(dateStr)}</span>
+      <span className="text-[10px] text-inkDim">{weekdayLabelFor(dateStr)}</span>
+    </div>
+  );
+}
+
+function UpcomingAgendaList({ entries, onEdit }) {
+  const [open, setOpen] = useState(false);
+  const grouped = {};
+  entries.forEach(e => {
+    (grouped[e.scheduledDate] = grouped[e.scheduledDate] || []).push(e);
+  });
+  const dates = Object.keys(grouped).sort();
+
+  return (
+    <div className="mt-3">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-xs text-inkDim py-2">
+        <span>{open ? '▼' : '▶'} Nächste 30 Tage</span>
+        <span className="font-stat">{entries.length} Einträge</span>
+      </button>
+      {open && (
+        <div className="space-y-3 mt-1">
+          {dates.length === 0 && <div className="text-xs text-inkDim pb-2">Nichts in den nächsten 30 Tagen geplant.</div>}
+          {dates.map(d => (
+            <div key={d}>
+              <DateHeading dateStr={d} />
+              <div className="space-y-1.5">
+                {grouped[d].map(entry => (
+                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+                    onComplete={() => {}} onEdit={onEdit} actionable={false} showDate={false} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompletionLogList({ entries, onEdit }) {
+  const [open, setOpen] = useState(false);
+  const grouped = {};
+  entries.forEach(e => {
+    (grouped[e.doneDate] = grouped[e.doneDate] || []).push(e);
+  });
+  const dates = Object.keys(grouped).sort().reverse(); // neueste Tage zuerst
+
+  return (
+    <div className="mt-1">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-xs text-inkDim py-2">
+        <span>{open ? '▼' : '▶'} Protokoll</span>
+        <span className="font-stat">{entries.length} erledigt</span>
+      </button>
+      {open && (
+        <div className="space-y-3 mt-1">
+          {dates.length === 0 && <div className="text-xs text-inkDim pb-2">Noch keine Aufgaben erledigt.</div>}
+          {dates.map(d => (
+            <div key={d}>
+              <DateHeading dateStr={d} />
+              <div className="space-y-1.5">
+                {grouped[d].map(entry => (
+                  <button key={entry.item.id + '_' + entry.scheduledDate} onClick={() => onEdit(entry.item)}
+                    className="w-full flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5 text-left active:opacity-70">
+                    <span className="text-lg shrink-0 opacity-70">{entry.item.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-inkDim truncate">{entry.item.title}</div>
+                    </div>
+                    <span className="text-heal text-sm shrink-0">✓</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   7. PROFIL-AUSWAHL & EDITOR
+   ============================================================ */
+
+function ProfileSelectScreen({ profiles, onSelect, onCreateNew }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10">
+      <div className="font-display text-3xl font-extrabold text-gold mb-1 tracking-wide">TeamQuest</div>
+      <div className="text-inkDim text-sm mb-10">Wer spielt mit?</div>
+      <div className="flex flex-wrap items-center justify-center gap-6">
+        {profiles.map(p => (
+          <button key={p.id} onClick={() => onSelect(p.id)} className="flex flex-col items-center gap-2 group">
+            <div
+              className="rounded-full flex items-center justify-center border-2 transition-transform group-active:scale-95"
+              style={{ width: 84, height: 84, background: p.color + '33', borderColor: p.color, fontSize: 38 }}
+            >
+              {p.icon}
+            </div>
+            <span className="text-sm text-ink">{p.name || 'Unbenannt'}</span>
+            <span className="text-xs text-inkDim font-stat">Lvl {p.level}</span>
+          </button>
+        ))}
+        {profiles.length < 2 && (
+          <button onClick={onCreateNew} className="flex flex-col items-center gap-2">
+            <div className="rounded-full border-2 border-dashed border-border flex items-center justify-center text-3xl text-inkDim" style={{ width: 84, height: 84 }}>
+              +
+            </div>
+            <span className="text-sm text-inkDim">Neues Profil</span>
+          </button>
+        )}
+      </div>
+      {profiles.length < 2 && (
+        <div className="text-xs text-inkDim mt-8 max-w-xs text-center">
+          Das Kampfsystem braucht genau zwei Profile — legt also für euch beide ein Profil an.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileEditor({ profile, isNew, onSave, onCancel }) {
+  const [name, setName] = useState(profile.name || '');
+  const [icon, setIcon] = useState(profile.icon || ANIMAL_ICONS[0]);
+  const [color, setColor] = useState(profile.color || PROFILE_COLORS[0]);
+  const [classKey, setClassKey] = useState(profile.classKey || 'krieger');
+
+  const canSave = name.trim().length > 0;
+
+  return (
+    <Modal title={isNew ? 'Neues Profil' : 'Profil bearbeiten'} onClose={onCancel}>
+      <div className="space-y-5">
+        <div>
+          <SectionLabel>Name</SectionLabel>
+          <input
+            value={name} onChange={e => setName(e.target.value)} placeholder="z. B. Lou"
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink placeholder-inkDim/60"
+            maxLength={20}
+          />
+        </div>
+        <div>
+          <SectionLabel>Icon</SectionLabel>
+          <div className="grid grid-cols-5 gap-2">
+            {ANIMAL_ICONS.map(a => (
+              <button key={a} onClick={() => setIcon(a)}
+                className={`text-2xl rounded-xl border-2 py-2 ${icon === a ? 'border-gold bg-gold/10' : 'border-border bg-surface'}`}>
+                {a}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Farbe</SectionLabel>
+          <div className="grid grid-cols-8 gap-2">
+            {PROFILE_COLORS.map(c => (
+              <button key={c} onClick={() => setColor(c)}
+                className="rounded-full border-2 aspect-square"
+                style={{ background: c, borderColor: color === c ? '#f0c869' : 'transparent' }}>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Klasse</SectionLabel>
+          <div className="grid grid-cols-3 gap-2">
+            {Object.values(CLASSES).map(c => (
+              <button key={c.key} onClick={() => setClassKey(c.key)}
+                className={`rounded-xl border-2 py-3 flex flex-col items-center gap-1 ${classKey === c.key ? 'border-gold bg-gold/10' : 'border-border bg-surface'}`}>
+                <span className="text-2xl">{c.icon}</span>
+                <span className="text-xs">{c.name}</span>
+                <span className="text-[10px] text-inkDim font-stat">{c.teamHp} Team-HP</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          disabled={!canSave}
+          onClick={() => onSave({ name: name.trim(), icon, color, classKey })}
+          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3 mt-2 active:scale-[0.98] transition-transform"
+        >
+          Speichern
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/* ============================================================
+   8. TAB: QUESTS
+   ============================================================ */
+
+function AddQuestModal({ categories, onAdd, onClose }) {
+  const [title, setTitle] = useState('');
+  const [xp, setXp] = useState(10);
+  const [icon, setIcon] = useState('📌');
+  const [category, setCategory] = useState(categories[0] || '');
+  const [newCategoryMode, setNewCategoryMode] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  const finalCategory = newCategoryMode ? newCategoryName.trim() : category;
+  const canSave = title.trim().length > 0 && finalCategory.length > 0;
+
+  return (
+    <Modal title="Neue Quest" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Titel</SectionLabel>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5" maxLength={40} />
+        </div>
+        <div>
+          <SectionLabel>Kategorie</SectionLabel>
+          <div className="flex flex-wrap gap-1.5">
+            {categories.map(c => (
+              <button key={c} onClick={() => { setCategory(c); setNewCategoryMode(false); }}
+                className={`text-xs font-medium px-3 py-2 rounded-full border ${
+                  !newCategoryMode && category === c ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'
+                }`}>
+                {c}
+              </button>
+            ))}
+            <button onClick={() => setNewCategoryMode(true)}
+              className={`text-xs font-medium px-3 py-2 rounded-full border ${
+                newCategoryMode ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'
+              }`}>
+              + Neue Kategorie
+            </button>
+          </div>
+          {newCategoryMode && (
+            <input value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)}
+              placeholder="Name der neuen Kategorie" maxLength={30}
+              className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 mt-2" />
+          )}
+        </div>
+        <div>
+          <SectionLabel>XP-Wert</SectionLabel>
+          <div className="flex gap-2">
+            {[10, 20].map(v => (
+              <button key={v} onClick={() => setXp(v)}
+                className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-stat font-semibold ${
+                  xp === v ? 'border-gold bg-gold/10 text-gold' : 'border-border bg-surface text-inkDim'
+                }`}>
+                {v} XP
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Icon (Emoji)</SectionLabel>
+          <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+            className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
+        </div>
+        <button disabled={!canSave}
+          onClick={() => onAdd({ title: title.trim(), xp, icon: icon || '📌', category: finalCategory })}
+          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
+          Quest hinzufügen
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DeleteQuestsModal({ quests, categories, onDelete, onClose }) {
+  const [selected, setSelected] = useState(() => new Set());
+
+  function toggle(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <Modal title="Aufgaben löschen" onClose={onClose} wide>
+      <div className="text-xs text-inkDim mb-3">Tippe Aufgaben an, um sie auszuwählen, und lösche sie dauerhaft.</div>
+      <div className="space-y-4 max-h-[50vh] overflow-y-auto">
+        {categories.map(cat => {
+          const inCat = quests.filter(q => q.category === cat);
+          if (inCat.length === 0) return null;
+          return (
+            <div key={cat}>
+              <SectionLabel>{cat}</SectionLabel>
+              <div className="space-y-1.5">
+                {inCat.map(q => {
+                  const isSelected = selected.has(q.id);
+                  return (
+                    <button key={q.id} onClick={() => toggle(q.id)}
+                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
+                        isSelected ? 'border-hp bg-hp/10' : 'border-border bg-surface'
+                      }`}>
+                      <span className="text-lg shrink-0">{q.icon}</span>
+                      <span className="text-sm flex-1 min-w-0 truncate">{q.title}</span>
+                      <span className="text-[10px] text-inkDim font-stat shrink-0">{q.xp} XP</span>
+                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${
+                        isSelected ? 'bg-hp border-hp text-ink' : 'border-border'
+                      }`}>{isSelected ? '✓' : ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <button disabled={selected.size === 0} onClick={() => onDelete([...selected])}
+        className="w-full bg-hp disabled:opacity-30 text-ink font-semibold rounded-xl py-3 mt-4">
+        {selected.size > 0 ? `${selected.size} Aufgabe${selected.size > 1 ? 'n' : ''} löschen` : 'Aufgaben löschen'}
+      </button>
+    </Modal>
+  );
+}
+
+function QuestCard({ quest, stage, onComplete, locked }) {
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-3.5 flex items-center gap-3">
+      <div className="text-2xl w-9 text-center shrink-0">{quest.icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-ink truncate">{quest.title}</div>
+        <div className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</div>
+      </div>
+      <div className="flex gap-1.5 shrink-0">
+        <button
+          onClick={() => onComplete('kurz')}
+          disabled={locked || stage === 'kurz' || stage === 'komplett'}
+          className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
+            stage === 'kurz' || stage === 'komplett' ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-bgElevated border-border text-inkDim active:scale-95'
+          } disabled:opacity-50`}
+        >
+          Kurz
+        </button>
+        <button
+          onClick={() => onComplete('komplett')}
+          disabled={locked || stage === 'komplett'}
+          className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
+            stage === 'komplett' ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim active:scale-95'
+          } disabled:opacity-50`}
+        >
+          ✓ Fertig
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuestCategorySection({ category, quests, todayProgress, onComplete, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const doneCount = quests.filter(q => todayProgress[q.id] === 'komplett').length;
+  return (
+    <div className="border border-border rounded-2xl overflow-hidden bg-surface/40">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-inkDim text-xs">{open ? '▼' : '▶'}</span>
+          <span className="font-display text-sm font-bold text-ink">{category}</span>
+        </div>
+        <span className="text-[10px] text-inkDim font-stat">{doneCount}/{quests.length}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-2.5">
+          {quests.map(q => (
+            <QuestCard
+              key={q.id}
+              quest={q}
+              stage={todayProgress[q.id] || null}
+              locked={false}
+              onComplete={(stage) => onComplete(q.id, stage)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuestsTab({ state, profile, onQuestComplete, onAddQuest, onDeleteQuests, onCalendarComplete, onOpenAddCalendar, onOpenEditCalendar }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const today = todayBerlin();
+  const todayProgress = profile.questProgress[today] || {};
+  const actionsEarned = getActionsEarnedToday(profile);
+  const actionsAvailable = getAvailableActions(profile);
+  const questXpEarned = getQuestXpEarnedToday(profile);
+  const questXpCap = getQuestXpCapToday(state, profile, today);
+  const allDone = state.quests.length > 0 && state.quests.every(q => todayProgress[q.id] === 'komplett');
+  const someDone = state.quests.some(q => todayProgress[q.id]);
+  const todayAgenda = getTodayAgenda(state, today);
+
+  const categoriesWithQuests = state.questCategories.filter(cat => state.quests.some(q => q.category === cat));
+
+  return (
+    <div className="px-4 pt-4 pb-28 space-y-4">
+      <TodayAgendaCard
+        entries={todayAgenda}
+        onComplete={onCalendarComplete}
+        onEdit={onOpenEditCalendar}
+        onAddClick={onOpenAddCalendar}
+      />
+
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="font-display text-lg font-bold text-ink">Heutige Quests</div>
+          <div className="text-xs text-inkDim mt-0.5">
+            {allDone ? '🌟 Alles erledigt heute!' : someDone ? 'In Arbeit …' : 'Noch nichts erledigt.'}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-stat text-sm text-gold">{actionsEarned}/{MAX_ACTIONS_PER_DAY}</div>
+          <div className="text-[10px] text-inkDim">Kampf-Aktionen</div>
+          <div className="font-stat text-xs text-heal mt-1">{questXpEarned}/{questXpCap} XP</div>
+        </div>
+      </div>
+
+      <div className="space-y-2.5">
+        {categoriesWithQuests.map(cat => (
+          <QuestCategorySection
+            key={cat}
+            category={cat}
+            quests={state.quests.filter(q => q.category === cat)}
+            todayProgress={todayProgress}
+            onComplete={onQuestComplete}
+            defaultOpen={false}
+          />
+        ))}
+      </div>
+
+      <div className="flex gap-2">
+        <button onClick={() => setShowAdd(true)}
+          className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
+          + Eigene Quest hinzufügen
+        </button>
+        <button onClick={() => setShowDelete(true)}
+          className="w-12 border border-dashed border-border rounded-2xl py-3 text-base text-inkDim active:scale-[0.99]"
+          aria-label="Aufgaben löschen">
+          🗑️
+        </button>
+      </div>
+
+      {actionsAvailable > 0 && (
+        <div className="text-xs text-inkDim text-center">
+          ⚔️ Du hast {actionsAvailable} {actionsAvailable === 1 ? 'Kampf-Aktion' : 'Kampf-Aktionen'} übrig — setze sie im Kampf-Tab ein.
+        </div>
+      )}
+
+      {(() => {
+        const method = topUnlockedMethod(profile);
+        if (!method) return null;
+        return (
+          <div className="bg-surface border border-border rounded-2xl p-4">
+            <SectionLabel>💡 Aktuelle Methode</SectionLabel>
+            <div className="text-sm font-medium text-gold mb-1">{method.title}</div>
+            <div className="text-xs text-inkDim leading-relaxed">{method.text}</div>
+            <div className="text-[10px] text-inkDim/70 mt-2">{method.source}</div>
+          </div>
+        );
+      })()}
+
+      {actionsEarned >= MAX_ACTIONS_PER_DAY && (
+        <div className="text-xs text-inkDim text-center">
+          Tageslimit für Kampf-Aktionen erreicht — weitere Quests geben noch XP, lösen aber keine Fähigkeit mehr aus.
+        </div>
+      )}
+      {questXpEarned >= questXpCap && (
+        <div className="text-xs text-inkDim text-center">
+          Tages-XP-Limit erreicht ({questXpCap} XP) — weitere Quests werden noch protokolliert, geben aber keine XP mehr. Eine weitere 20XP-Quest komplett erledigen erhöht das Limit um {QUEST_XP_CAP_BONUS_PER_HARD_QUEST}.
+        </div>
+      )}
+
+      {showAdd && (
+        <AddQuestModal categories={state.questCategories} onClose={() => setShowAdd(false)}
+          onAdd={(q) => { onAddQuest(q); setShowAdd(false); }} />
+      )}
+      {showDelete && (
+        <DeleteQuestsModal quests={state.quests} categories={state.questCategories}
+          onClose={() => setShowDelete(false)}
+          onDelete={(ids) => { onDeleteQuests(ids); setShowDelete(false); }} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   9. TAB: KAMPF
+   ============================================================ */
+
+function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
+  if (profiles.length < 2) {
+    return (
+      <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">
+        Das Kampfsystem braucht genau zwei Profile.<br />Legt unter "Mehr" ein zweites Profil an.
+      </div>
+    );
+  }
+  const boss = bossStatsForTier(state.combat.bossTier);
+  const teamMax = teamHpMax(state);
+  const bossLow = state.combat.bossHp / boss.hp < 0.25;
+  const teamLow = teamMax > 0 && state.combat.teamHp / teamMax < 0.3;
+
+  return (
+    <div className="px-4 pt-4 pb-28 space-y-5">
+      <div className="bg-surface border border-border rounded-2xl p-4 text-center">
+        <div className="text-5xl mb-2">{boss.emoji}</div>
+        <div className="font-display font-bold text-gold">{bossDisplayName(state.combat.bossTier)}</div>
+        <div className="text-xs text-inkDim font-stat mb-2">Boss {state.combat.bossTier + 1}</div>
+        <Bar value={state.combat.bossHp} max={boss.hp} colorClass="bg-hp" low={bossLow} />
+        <div className="text-xs text-inkDim font-stat mt-1">{state.combat.bossHp} / {boss.hp} HP</div>
+      </div>
+
+      <div className="bg-surface border border-border rounded-2xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <SectionLabel>Team-HP</SectionLabel>
+          <span className="font-stat text-xs text-inkDim">{state.combat.teamHp} / {teamMax}</span>
+        </div>
+        <Bar value={state.combat.teamHp} max={teamMax} colorClass="bg-heal" low={teamLow} />
+        {state.combat.pendingShield > 0 && (
+          <div className="text-xs text-shield mt-2">🛡️ Nächster Gegenangriff -{state.combat.pendingShield}</div>
+        )}
+        {state.combat.bleeds.length > 0 && (
+          <div className="text-xs text-krieger mt-1">🩸 {state.combat.bleeds.length} aktive Blutung(en) auf dem Boss</div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        {profiles.filter(p => p.id === activeProfileId).map(p => {
+          const available = getAvailableActions(p);
+          return (
+            <div key={p.id} className="bg-surface border border-gold/40 rounded-2xl p-3.5">
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ProfileAvatar profile={p} size={32} />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium truncate">{p.name}</div>
+                    <div className="text-[10px] text-inkDim">{getClass(p).name} · Lvl {p.level}</div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="font-stat text-sm text-gold">{available}</div>
+                  <div className="text-[9px] text-inkDim">verfügbar</div>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {unlockedAbilities(p).map(a => {
+                  const disabled = a.onCooldown || available <= 0;
+                  return (
+                    <button
+                      key={a.id}
+                      disabled={disabled}
+                      onClick={() => onUseAbility(p.id, a.id)}
+                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-start justify-between gap-2 ${
+                        disabled ? 'border-border bg-bgElevated/40 opacity-50' : 'border-border bg-bgElevated active:scale-[0.98]'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-xs font-semibold text-ink">
+                          {a.name}{a.onCooldown && <span className="text-inkDim font-normal"> · Abklingzeit</span>}
+                        </div>
+                        <div className="text-[10px] text-inkDim mt-0.5">{a.desc}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {available <= 0 && (
+                <div className="text-[10px] text-inkDim mt-2">Keine Aktionen übrig — erst Quests abschließen.</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <SectionLabel>Kampf-Log</SectionLabel>
+        <div className="bg-surface border border-border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-1.5">
+          {state.log.length === 0 && <div className="text-xs text-inkDim">Noch keine Aktionen — schließt Quests ab, um Aktionen zu verdienen, und setzt sie hier gegen den Boss ein.</div>}
+          {state.log.map(l => (
+            <div key={l.id} className="text-xs text-inkDim leading-snug">{l.text}</div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   10. TAB: SHOP
+   ============================================================ */
+
+function AddShopItemModal({ category, onAdd, onClose }) {
+  const [title, setTitle] = useState('');
+  const [cost, setCost] = useState(50);
+  const [icon, setIcon] = useState('🎁');
+  return (
+    <Modal title={`Neues Item (${category === 'gemeinsam' ? 'Gemeinsam' : 'Geschenk'})`} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Titel</SectionLabel>
+          <input value={title} onChange={e => setTitle(e.target.value)}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5" maxLength={40} />
+        </div>
+        <div>
+          <SectionLabel>Kosten (Gold)</SectionLabel>
+          <input type="number" min={1} value={cost} onChange={e => setCost(Number(e.target.value))}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 font-stat" />
+        </div>
+        <div>
+          <SectionLabel>Icon (Emoji)</SectionLabel>
+          <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+            className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
+        </div>
+        <button disabled={!title.trim()} onClick={() => onAdd({ title: title.trim(), cost: cost || 1, icon: icon || '🎁' })}
+          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
+          Hinzufügen
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ShopItemCard({ item, category, profile, partner, onBuy }) {
+  const splitBuyer = category === 'gemeinsam' ? Math.ceil(item.cost / 2) : item.cost;
+  const affordable = profile.gold >= splitBuyer;
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-3.5 flex items-center gap-3">
+      <div className="text-2xl w-9 text-center shrink-0">{item.icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-ink truncate">{item.title}</div>
+        <div className="text-xs text-inkDim font-stat">
+          {category === 'gemeinsam' ? `${item.cost}G gesamt · du zahlst ${splitBuyer}G` : `${item.cost}G`}
+        </div>
+      </div>
+      <button
+        disabled={!affordable || !partner}
+        onClick={() => onBuy(item, category, splitBuyer)}
+        className="text-xs font-semibold rounded-lg px-3 py-2 bg-gold disabled:opacity-30 text-bg active:scale-95 shrink-0"
+      >
+        Kaufen
+      </button>
+    </div>
+  );
+}
+
+function DeleteShopItemsModal({ shop, onDelete, onClose }) {
+  const [selected, setSelected] = useState(() => new Set());
+
+  function toggle(key) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  const sections = [
+    { key: 'gemeinsam', label: 'Gemeinsam einlösen', items: shop.gemeinsam },
+    { key: 'geschenk', label: 'Geschenk vom Partner', items: shop.geschenk },
+  ];
+
+  return (
+    <Modal title="Items löschen" onClose={onClose} wide>
+      <div className="text-xs text-inkDim mb-3">Tippe Items an, um sie auszuwählen, und lösche sie dauerhaft aus dem Katalog.</div>
+      <div className="space-y-4 max-h-[50vh] overflow-y-auto">
+        {sections.map(sec => {
+          if (sec.items.length === 0) return null;
+          return (
+            <div key={sec.key}>
+              <SectionLabel>{sec.label}</SectionLabel>
+              <div className="space-y-1.5">
+                {sec.items.map(item => {
+                  const itemKey = `${sec.key}:${item.id}`;
+                  const isSelected = selected.has(itemKey);
+                  return (
+                    <button key={item.id} onClick={() => toggle(itemKey)}
+                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
+                        isSelected ? 'border-hp bg-hp/10' : 'border-border bg-surface'
+                      }`}>
+                      <span className="text-lg shrink-0">{item.icon}</span>
+                      <span className="text-sm flex-1 min-w-0 truncate">{item.title}</span>
+                      <span className="text-[10px] text-inkDim font-stat shrink-0">{item.cost}G</span>
+                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${
+                        isSelected ? 'bg-hp border-hp text-ink' : 'border-border'
+                      }`}>{isSelected ? '✓' : ''}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <button disabled={selected.size === 0} onClick={() => onDelete([...selected])}
+        className="w-full bg-hp disabled:opacity-30 text-ink font-semibold rounded-xl py-3 mt-4">
+        {selected.size > 0 ? `${selected.size} Item${selected.size > 1 ? 's' : ''} löschen` : 'Items löschen'}
+      </button>
+    </Modal>
+  );
+}
+
+function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopItems, onConfirm, onDecline }) {
+  const [addCategory, setAddCategory] = useState(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const myConfirmations = state.pendingConfirmations.filter(c => c.partnerId === profile.id);
+
+  return (
+    <div className="px-4 pt-4 pb-28 space-y-6">
+      {myConfirmations.map(c => (
+        <div key={c.id} className="bg-gold/10 border border-gold/40 rounded-2xl p-4 slide-up">
+          <div className="text-sm text-ink mb-1">
+            <strong>{state.profiles.find(p => p.id === c.buyerId)?.name}</strong> möchte "{c.title}" kaufen
+            {c.category === 'geschenk' ? ' — und du sollst es erfüllen.' : ' (gemeinsam, ihr teilt euch die Kosten).'}
+          </div>
+          <div className="text-xs text-inkDim mb-3 font-stat">Dein Anteil: {c.partnerPaid}G</div>
+          <div className="flex gap-2">
+            <button onClick={() => onConfirm(c.id)} className="flex-1 bg-heal text-bg font-semibold rounded-xl py-2 text-sm active:scale-95">Bestätigen</button>
+            <button onClick={() => onDecline(c.id)} className="flex-1 bg-surface2 border border-border text-ink rounded-xl py-2 text-sm active:scale-95">Ablehnen</button>
+          </div>
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between">
+        <SectionLabel>Dein Gold</SectionLabel>
+        <div className="flex items-center gap-3">
+          <span className="font-stat text-gold font-semibold">{profile.gold} G</span>
+          <button onClick={() => setShowDelete(true)} className="text-inkDim text-sm" aria-label="Items löschen">🗑️</button>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-display text-sm font-bold text-ink">Gemeinsam einlösen</div>
+          <button onClick={() => setAddCategory('gemeinsam')} className="text-xs text-inkDim">+ Item</button>
+        </div>
+        <div className="space-y-2.5">
+          {state.shop.gemeinsam.map(item => (
+            <ShopItemCard key={item.id} item={item} category="gemeinsam" profile={profile} partner={partner} onBuy={onBuy} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="font-display text-sm font-bold text-ink">Geschenk vom Partner</div>
+          <button onClick={() => setAddCategory('geschenk')} className="text-xs text-inkDim">+ Item</button>
+        </div>
+        <div className="space-y-2.5">
+          {state.shop.geschenk.map(item => (
+            <ShopItemCard key={item.id} item={item} category="geschenk" profile={profile} partner={partner} onBuy={onBuy} />
+          ))}
+        </div>
+      </div>
+
+      {addCategory && (
+        <AddShopItemModal category={addCategory} onClose={() => setAddCategory(null)}
+          onAdd={(item) => { onAddShopItem(addCategory, item); setAddCategory(null); }} />
+      )}
+      {showDelete && (
+        <DeleteShopItemsModal shop={state.shop} onClose={() => setShowDelete(false)}
+          onDelete={(keys) => { onDeleteShopItems(keys); setShowDelete(false); }} />
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   11. TAB: MEHR (Profil, Kalender, Bibliothek, Inventar, Export)
+   ============================================================ */
+
+function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate }) {
+  const [monthOffset, setMonthOffset] = useState(0);
+  const now = new Date();
+  const ref = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const year = ref.getFullYear(), month = ref.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Mo=0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = ref.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  function dateStrFor(d) {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  // Ein einzelner grüner Punkt, sobald an dem Tag mindestens eine Aufgabe
+  // erledigt wurde — unabhängig davon, wie viele es insgesamt waren.
+  function hasProgress(d) {
+    const progress = profile.questProgress[dateStrFor(d)];
+    return !!progress && Object.keys(progress).length > 0;
+  }
+
+  // Alle Kalender-Vorkommen (Aufgaben/Termine inkl. Wiederholungen) für den
+  // sichtbaren Monat dem Tag zuordnen, an dem sie tatsächlich erscheinen sollen:
+  // erledigte Aufgaben am Tag der Erledigung, offene am effektiven (ggf. mitgenommenen) Tag.
+  const calendarByDate = daysInMonth > 0
+    ? getMonthAgenda(({ calendarItems: calendarItems || [] }), dateStrFor(1), dateStrFor(daysInMonth), todayBerlin())
+    : {};
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <button onClick={() => setMonthOffset(o => o - 1)} className="text-inkDim px-2">‹</button>
+        <div className="text-sm font-medium capitalize">{monthName}</div>
+        <button onClick={() => setMonthOffset(o => o + 1)} className="text-inkDim px-2">›</button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-inkDim mb-1">
+        {['Mo','Di','Mi','Do','Fr','Sa','So'].map(d => <div key={d}>{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i}></div>;
+          const dateStr = dateStrFor(d);
+          const done = hasProgress(d);
+          const dayEntries = calendarByDate[dateStr] || [];
+          const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe');
+          const hasTermin = dayEntries.some(e => e.item.kind === 'termin');
+          const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
+          const isSelected = selectedDate === dateStr;
+          const isToday = dateStr === todayBerlin();
+          return (
+            <button
+              key={i}
+              onClick={() => onSelectDate(isSelected ? null : dateStr)}
+              className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
+                isSelected ? 'bg-gold/15 border-gold' : 'bg-surface border-border'
+              } ${isToday ? 'ring-2 ring-goldBright ring-offset-1 ring-offset-bg' : ''}`}
+            >
+              <span className={isToday ? 'text-goldBright font-bold' : 'text-inkDim'}>{d}</span>
+              <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
+                {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
+                {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
+                {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
+                {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="text-[10px] text-inkDim mt-2 space-y-0.5">
+        <div>🟢 Quest erledigt · 🟠 Aufgabe geplant · 🔵 Termin geplant · 🟡 Item geplant</div>
+      </div>
+    </div>
+  );
+}
+
+// Quest-Detail-Panel für den im Kalender angeklickten Tag — bewusst aus
+// CalendarGrid ausgelagert, damit es im Kalender-Tab unabhängig positioniert
+// werden kann (z. B. unterhalb von Tagesblick/Protokoll statt direkt im Grid).
+function SelectedDayQuestsCard({ profile, quests, selectedDate }) {
+  if (!selectedDate) return null;
+  const selectedProgress = profile.questProgress[selectedDate] || {};
+  const selectedEntries = Object.entries(selectedProgress);
+  if (selectedEntries.length === 0) return null;
+
+  return (
+    <div className="bg-surface border border-border rounded-2xl p-3.5 slide-up">
+      <div className="text-xs font-medium text-ink mb-2">
+        {new Date(selectedDate + 'T00:00:00').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} · Quests
+      </div>
+      <div className="space-y-1.5">
+        {selectedEntries.map(([questId, stage]) => {
+          const quest = quests.find(q => q.id === questId);
+          return (
+            <div key={questId} className="flex items-center justify-between text-xs">
+              <span className="text-ink">{quest ? `${quest.icon} ${quest.title}` : '❔ Aufgabe (gelöscht)'}</span>
+              <span className={stage === 'komplett' ? 'text-heal' : 'text-gold'}>
+                {stage === 'komplett' ? '✓ Komplett' : 'Kurz begonnen'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MethodsLibrary({ profile }) {
+  const topUnlockedTitle = topUnlockedMethod(profile)?.title || null;
+  const [openTitle, setOpenTitle] = useState(topUnlockedTitle);
+
+  return (
+    <div className="space-y-2">
+      {METHODS.map(m => {
+        const isUnlocked = profile.level >= m.unlockLevel;
+        const isOpen = openTitle === m.title;
+        return (
+          <div key={m.title} className={`border rounded-2xl overflow-hidden ${isUnlocked ? 'border-border bg-surface' : 'border-border/50 bg-surface/40'}`}>
+            <button
+              disabled={!isUnlocked}
+              onClick={() => setOpenTitle(isOpen ? null : m.title)}
+              className="w-full text-left px-4 py-3 flex items-center justify-between"
+            >
+              <div>
+                <div className={`text-sm font-medium ${isUnlocked ? 'text-ink' : 'text-inkDim'}`}>
+                  {isUnlocked ? m.title : `🔒 Ab Level ${m.unlockLevel}`}
+                </div>
+                {isUnlocked && <div className="text-[10px] text-inkDim mt-0.5">{m.source}</div>}
+              </div>
+              {isUnlocked && <span className="text-inkDim text-xs">{isOpen ? '▲' : '▼'}</span>}
+            </button>
+            {isUnlocked && isOpen && (
+              <div className="px-4 pb-3 text-xs text-inkDim leading-relaxed">{m.text}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ItemDateModal({ item, onSave, onClose }) {
+  const [date, setDate] = useState(item.plannedDate || '');
+  return (
+    <Modal title={`Datum für "${item.title}"`} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Geplantes Datum</SectionLabel>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 font-stat" />
+        </div>
+        <button onClick={() => onSave(date || null)}
+          className="w-full bg-gold text-bg font-semibold rounded-xl py-3">
+          Speichern
+        </button>
+        {item.plannedDate && (
+          <button onClick={() => onSave(null)} className="w-full text-xs text-inkDim text-center">
+            Datum entfernen
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function InventoryList({ profile, sharedInventory, onMarkDone, onSetDate }) {
+  const [dateItem, setDateItem] = useState(null); // { scope, item }
+  const personal = (profile.inventory || []).filter(item => !item.done);
+  const shared = (sharedInventory || []).filter(item => !item.done);
+
+  function ItemRow({ item, scope }) {
+    return (
+      <div className="bg-surface border border-border rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <span className="text-sm">{item.icon} {item.title}</span>
+          {item.plannedDate && (
+            <div className="text-[10px] text-gold font-stat mt-0.5">📅 {formatShortDate(item.plannedDate)}</div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setDateItem({ scope, item })} className="text-sm" aria-label="Datum zuordnen">📅</button>
+          <button onClick={() => onMarkDone(scope, item.id)} className="text-xs text-gold">Als erledigt markieren</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <SectionLabel>Deine Geschenke (zu erfüllen)</SectionLabel>
+        {personal.length === 0 && <div className="text-xs text-inkDim">Noch nichts hier.</div>}
+        <div className="space-y-2">
+          {personal.map(item => <ItemRow key={item.id} item={item} scope="personal" />)}
+        </div>
+      </div>
+      <div>
+        <SectionLabel>Gemeinsamer Bereich</SectionLabel>
+        {shared.length === 0 && <div className="text-xs text-inkDim">Noch nichts hier.</div>}
+        <div className="space-y-2">
+          {shared.map(item => <ItemRow key={item.id} item={item} scope="shared" />)}
+        </div>
+      </div>
+      {dateItem && (
+        <ItemDateModal item={dateItem.item} onClose={() => setDateItem(null)}
+          onSave={(date) => { onSetDate(dateItem.scope, dateItem.item.id, date); setDateItem(null); }} />
+      )}
+    </div>
+  );
+}
+
+// Protokoll für den Inventar-Tab: "Erledigt" = abgeschlossene gemeinsame
+// Aktivitäten (gemeinsamer Bereich), "Bekommen" = erfüllte persönliche
+// Geschenke beider Profile, jeweils mit Empfänger gekennzeichnet.
+function InventoryLogList({ profile, partner, sharedInventory }) {
+  const [open, setOpen] = useState(false);
+  const erledigt = (sharedInventory || []).filter(i => i.done);
+  const bekommen = [
+    ...(profile.inventory || []).filter(i => i.done).map(i => ({ ...i, ownerName: profile.name, ownerIcon: profile.icon })),
+    ...(partner ? (partner.inventory || []).filter(i => i.done).map(i => ({ ...i, ownerName: partner.name, ownerIcon: partner.icon })) : []),
+  ];
+
+  return (
+    <div className="mt-4">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-xs text-inkDim py-2">
+        <span>{open ? '▼' : '▶'} Protokoll</span>
+        <span className="font-stat">{erledigt.length + bekommen.length} Einträge</span>
+      </button>
+      {open && (
+        <div className="space-y-4 mt-1">
+          <div>
+            <SectionLabel>✅ Erledigt</SectionLabel>
+            {erledigt.length === 0 && <div className="text-xs text-inkDim pb-1">Noch nichts erledigt.</div>}
+            <div className="space-y-1.5">
+              {erledigt.map(item => (
+                <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
+                  <span className="text-base shrink-0 opacity-70">{item.icon}</span>
+                  <span className="text-sm text-inkDim flex-1 truncate">{item.title}</span>
+                  <span className="text-heal text-sm shrink-0">✓</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <SectionLabel>🎁 Bekommen</SectionLabel>
+            {bekommen.length === 0 && <div className="text-xs text-inkDim pb-1">Noch nichts bekommen.</div>}
+            <div className="space-y-1.5">
+              {bekommen.map(item => (
+                <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
+                  <span className="text-base shrink-0 opacity-70">{item.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-inkDim truncate">{item.title}</div>
+                    <div className="text-[10px] text-inkDim/70">{item.ownerIcon} {item.ownerName}</div>
+                  </div>
+                  <span className="text-heal text-sm shrink-0">✓</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair }) {
+  const [section, setSection] = useState('profil');
+  const [confirmUnpair, setConfirmUnpair] = useState(false);
+  const fileInputRef = useRef(null);
+  const sections = [
+    { key: 'profil', label: 'Profil' },
+    { key: 'bibliothek', label: 'Bibliothek' },
+    { key: 'sync', label: 'Sync' },
+    { key: 'daten', label: 'Daten' },
+  ];
+
+  return (
+    <div className="px-4 pt-4 pb-28">
+      <div className="flex gap-1.5 overflow-x-auto mb-5 -mx-4 px-4">
+        {sections.map(s => (
+          <button key={s.key} onClick={() => setSection(s.key)}
+            className={`text-xs font-medium px-3 py-2 rounded-full border whitespace-nowrap ${
+              section === s.key ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'
+            }`}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'profil' && (
+        <div className="space-y-4">
+          <div className="bg-surface border border-border rounded-2xl p-4 flex items-center gap-3">
+            <ProfileAvatar profile={profile} size={56} />
+            <div className="flex-1">
+              <div className="font-display font-bold">{profile.name}</div>
+              <div className="text-xs text-inkDim">{getClass(profile).name} · Level {profile.level}</div>
+              <div className="mt-1.5">
+                <Bar value={profile.xp} max={xpForLevel(profile.level)} colorClass="bg-gold" />
+                <div className="text-[10px] text-inkDim font-stat mt-1">{profile.xp} / {xpForLevel(profile.level)} XP</div>
+              </div>
+            </div>
+          </div>
+          <button onClick={() => onEditProfile(profile)} className="w-full bg-surface border border-border rounded-xl py-2.5 text-sm">
+            Profil bearbeiten
+          </button>
+          {state.profiles.length > 1 && (
+            <button onClick={onSwitchProfile} className="w-full bg-surface border border-border rounded-xl py-2.5 text-sm text-inkDim">
+              Profil wechseln
+            </button>
+          )}
+        </div>
+      )}
+
+      {section === 'bibliothek' && <MethodsLibrary profile={profile} />}
+
+      {section === 'sync' && (
+        <div className="space-y-4">
+          <div className="bg-surface border border-border rounded-2xl p-4 text-center space-y-2">
+            <div className="text-xs text-inkDim">Team-Code</div>
+            <div className="font-stat text-2xl tracking-[0.2em] text-gold font-bold">{pairingCode}</div>
+            <div className="text-xs text-inkDim flex items-center justify-center gap-1.5 mt-1">
+              <ConnectionDot status={connStatus} />
+              {connStatus === 'online' ? 'Live verbunden' : connStatus === 'offline' ? 'Keine Verbindung' : 'Verbinde…'}
+            </div>
+          </div>
+          <div className="text-xs text-inkDim leading-relaxed">
+            Beide Geräte mit demselben Team-Code synchronisieren sich automatisch in Echtzeit. Den Code braucht ihr nur noch einmal, falls ein weiteres Gerät dazukommt.
+          </div>
+          {!confirmUnpair ? (
+            <button onClick={() => setConfirmUnpair(true)} className="w-full bg-surface border border-hp/40 text-hp rounded-xl py-2.5 text-sm">
+              Gerät trennen
+            </button>
+          ) : (
+            <div className="bg-surface border border-hp/40 rounded-xl p-3.5 space-y-2.5">
+              <div className="text-xs text-inkDim leading-relaxed">
+                Dieses Gerät verliert den Team-Code lokal (die Daten beim Partner bleiben erhalten). Wirklich trennen?
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmUnpair(false)} className="flex-1 bg-surface border border-border rounded-lg py-2 text-xs text-inkDim">
+                  Abbrechen
+                </button>
+                <button onClick={onUnpair} className="flex-1 bg-hp text-ink rounded-lg py-2 text-xs font-semibold">
+                  Ja, trennen
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {section === 'daten' && (
+        <div className="space-y-4">
+          <div className="text-xs text-inkDim leading-relaxed">
+            Die App synchronisiert automatisch über euren Team-Code (siehe Sync-Tab). Export/Import dient als manuelles Backup oder zur Übertragung auf ein ganz neues Gerät.
+          </div>
+          <button onClick={onExport} className="w-full bg-surface border border-border rounded-xl py-2.5 text-sm">
+            Stand exportieren (.json)
+          </button>
+          <button onClick={() => fileInputRef.current?.click()} className="w-full bg-surface border border-border rounded-xl py-2.5 text-sm">
+            Stand importieren (.json)
+          </button>
+          <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
+            onChange={e => { if (e.target.files[0]) onImport(e.target.files[0]); e.target.value = ''; }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   12. BOTTOM NAVIGATION
+   ============================================================ */
+
+function BottomNav({ active, setActive, badges }) {
+  const b = badges || {};
+  const tabs = [
+    { key: 'kalender', label: 'Kalender', icon: '📅', badge: b.kalender },
+    { key: 'quests', label: 'Quests', icon: '📜' },
+    { key: 'kampf', label: 'Kampf', icon: '⚔️' },
+    { key: 'shop', label: 'Shop', icon: '🛒', badge: b.shop },
+    { key: 'inventar', label: 'Inventar', icon: '🎒' },
+    { key: 'mehr', label: 'Mehr', icon: '☰' },
+  ];
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-40 bg-bgElevated border-t border-border safe-bottom">
+      <div className="max-w-md mx-auto grid grid-cols-6">
+        {tabs.map(t => (
+          <button key={t.key} onClick={() => setActive(t.key)}
+            className={`flex flex-col items-center gap-0.5 py-2.5 relative ${active === t.key ? 'text-gold' : 'text-inkDim'}`}>
+            <span className="text-lg">{t.icon}</span>
+            <span className="text-[9px] font-medium leading-tight">{t.label}</span>
+            {t.badge > 0 && (
+              <span className="absolute top-1 right-[18%] bg-hp text-ink text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{t.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   12b. SYNC / GERÄTE-KOPPLUNG
+   ============================================================ */
+
+function FirebaseSetupNotice() {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-6 text-center bg-vignette">
+      <div className="max-w-sm">
+        <div className="text-4xl mb-3">⚙️</div>
+        <div className="font-display text-lg font-bold text-gold mb-2">Firebase noch nicht eingerichtet</div>
+        <div className="text-sm text-inkDim leading-relaxed">
+          In <span className="font-stat text-ink">FIREBASE_CONFIG</span> (Abschnitt „3. STORAGE-SCHICHT" im Code) müssen erst die echten Projekt-Werte aus der Firebase-Console eingetragen werden, bevor synchronisiert werden kann.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-vignette">
+      <div className="text-center">
+        <div className="text-3xl mb-2 animate-pulse">⚔️</div>
+        <div className="text-xs text-inkDim">Verbinde…</div>
+      </div>
+    </div>
+  );
+}
+
+function ConnectionDot({ status }) {
+  const color = status === 'online' ? 'bg-heal' : status === 'offline' ? 'bg-hp' : 'bg-gold';
+  const label = status === 'online' ? 'Live verbunden' : status === 'offline' ? 'Keine Verbindung' : 'Verbinde…';
+  return <span className={`w-1.5 h-1.5 rounded-full ${color} ${status !== 'online' ? 'animate-pulse' : ''}`} title={label}></span>;
+}
+
+function PairingSetup({ onComplete }) {
+  const [mode, setMode] = useState(null); // null | 'create' | 'join'
+  const [generated, setGenerated] = useState(null);
+  const [inputCode, setInputCode] = useState('');
+  const [error, setError] = useState('');
+
+  function handleCreate() {
+    setGenerated(generatePairingCode());
+    setMode('create');
+  }
+
+  function handleJoin() {
+    const clean = inputCode.trim().toUpperCase();
+    if (clean.length < 4) { setError('Bitte den vollständigen Code eingeben.'); return; }
+    onComplete(clean);
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-5 bg-vignette">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-4xl mb-2">⚔️</div>
+          <div className="font-display text-2xl font-bold text-gold">TeamQuest</div>
+          <div className="text-sm text-inkDim mt-1">Geräte koppeln, um gemeinsam zu spielen</div>
+        </div>
+
+        {!mode && (
+          <div className="space-y-3">
+            <button onClick={handleCreate}
+              className="w-full bg-gold text-bg font-semibold rounded-xl py-3.5 active:scale-[0.98] transition-transform">
+              Neues Team erstellen
+            </button>
+            <button onClick={() => setMode('join')}
+              className="w-full bg-surface border border-border rounded-xl py-3.5 text-ink">
+              Code eines Partners eingeben
+            </button>
+          </div>
+        )}
+
+        {mode === 'create' && generated && (
+          <div className="bg-surface border border-border rounded-2xl p-5 text-center space-y-4">
+            <div className="text-xs text-inkDim">Euer Team-Code</div>
+            <div className="font-stat text-3xl tracking-[0.2em] text-gold font-bold">{generated}</div>
+            <div className="text-xs text-inkDim leading-relaxed">
+              Teilt diesen Code mit eurem Partner (z. B. per Nachricht). Er trägt ihn auf seinem Gerät unter „Code eines Partners eingeben" ein — danach sind beide Geräte verbunden.
+            </div>
+            <button onClick={() => onComplete(generated)}
+              className="w-full bg-gold text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
+              Weiter
+            </button>
+          </div>
+        )}
+
+        {mode === 'join' && (
+          <div className="bg-surface border border-border rounded-2xl p-5 space-y-4">
+            <div>
+              <SectionLabel>Team-Code</SectionLabel>
+              <input
+                value={inputCode}
+                onChange={e => { setInputCode(e.target.value.toUpperCase()); setError(''); }}
+                placeholder="z. B. K7P2QX" maxLength={8}
+                className="w-full bg-bgElevated border border-border rounded-xl px-3 py-3 text-ink text-center font-stat text-xl tracking-[0.2em] placeholder-inkDim/40"
+              />
+              {error && <div className="text-xs text-hp mt-2">{error}</div>}
+            </div>
+            <button onClick={handleJoin}
+              className="w-full bg-gold text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
+              Verbinden
+            </button>
+            <button onClick={() => setMode(null)} className="w-full text-xs text-inkDim py-1">Zurück</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   13. APP (Hauptkomponente)
+   ============================================================ */
+
+function App() {
+  const [pairingCode, setPairingCodeState] = useState(() => getPairingCode());
+
+  if (!FIREBASE_READY) return <FirebaseSetupNotice />;
+  if (!pairingCode) {
+    return (
+      <PairingSetup onComplete={(code) => {
+        setStoredPairingCode(code);
+        setPairingCodeState(code);
+      }} />
+    );
+  }
+  return (
+    <TeamQuestApp
+      pairingCode={pairingCode}
+      onUnpair={() => { clearPairingCode(); setPairingCodeState(null); }}
+    />
+  );
+}
+
+function TeamQuestApp({ pairingCode, onUnpair }) {
+  const [state, setState] = useState(() => initialState());
+  const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [connStatus, setConnStatus] = useState('connecting'); // 'connecting' | 'online' | 'offline'
+  const isRemoteUpdate = useRef(false);
+  const [activeTab, setActiveTab] = useState('kalender');
+  const [toasts, setToasts] = useState([]);
+  const [editingProfile, setEditingProfile] = useState(null);
+  const [calendarModal, setCalendarModal] = useState(null); // null | { mode: 'add', date } | { mode: 'edit', item }
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(null); // im Kalender-Tab angeklickter Tag (null = heute)
+
+  // Anonyme Anmeldung bei Firebase — nötig, damit die Security Rules (auth != null) greifen.
+  useEffect(() => {
+    let mounted = true;
+    fbAuth.signInAnonymously().catch(e => console.error('TeamQuest: Anmeldung fehlgeschlagen', e));
+    const unsub = fbAuth.onAuthStateChanged(user => { if (mounted && user) setAuthReady(true); });
+    return () => { mounted = false; unsub(); };
+  }, []);
+
+  // Verbindungsstatus zur Firebase-Realtime-Database (eingebauter Indikator-Pfad).
+  useEffect(() => {
+    const ref = fbDb.ref('.info/connected');
+    const handler = (snap) => setConnStatus(snap.val() ? 'online' : 'offline');
+    ref.on('value', handler);
+    return () => ref.off('value', handler);
+  }, []);
+
+  // Initiales Laden + Live-Abo, sobald angemeldet. Eingehende Partner-Änderungen
+  // werden als "remote" markiert, damit sie nicht sofort wieder zurückgeschrieben werden.
+  useEffect(() => {
+    if (!authReady) return;
+    let mounted = true;
+    Storage.load(pairingCode).then(data => {
+      if (!mounted) return;
+      isRemoteUpdate.current = true;
+      setState(migrateState(data) || initialState());
+      setLoading(false);
+    });
+    const unsubscribe = Storage.subscribe(pairingCode, (data) => {
+      isRemoteUpdate.current = true;
+      setState(migrateState(data) || initialState());
+    });
+    return () => { mounted = false; unsubscribe(); };
+  }, [authReady, pairingCode]);
+
+  // Persistenz: jede LOKALE State-Änderung wird an Firebase gesendet.
+  // (Änderungen, die selbst aus dem Live-Abo kamen, werden hier übersprungen,
+  // sonst würden sich beide Geräte gegenseitig endlos Bestätigungen zuschicken.)
+  useEffect(() => {
+    if (loading) return;
+    if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
+    Storage.save(pairingCode, state);
+  }, [state]);
+
+  // Team-HP beim allerersten Laden mit zwei Profilen initialisieren.
+  useEffect(() => {
+    if (state.profiles.length === 2 && state.combat.teamHp === null) {
+      setState(s => ({ ...s, combat: { ...s.combat, teamHp: teamHpMax(s) } }));
+    }
+  }, [state.profiles.length]);
+
+  if (loading) return <LoadingScreen />;
+
+  function pushToast(text, type) {
+    const id = uid('toast');
+    setToasts(t => [...t, { id, text, type: type || 'info' }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200);
+  }
+
+  // Zentraler State-Funnel: klont den aktuellen State, wendet den Mutator an,
+  // setzt ihn und gibt ihn synchron zurück — so können Aufrufer sofort mit dem
+  // neuen Stand weiterarbeiten, ohne auf den asynchronen React-Re-Render zu warten.
+  function update(mutator) {
+    const next = JSON.parse(JSON.stringify(state));
+    mutator(next);
+    setState(next);
+    return next;
+  }
+
+  const activeProfile = state.profiles.find(p => p.id === state.activeProfileId) || null;
+  const partnerProfile = state.profiles.find(p => p.id !== state.activeProfileId) || null;
+
+  if (!activeProfile) {
+    if (editingProfile) {
+      return (
+        <ProfileEditor
+          profile={editingProfile.isNew ? freshProfile({
+            icon: ANIMAL_ICONS[state.profiles.length % ANIMAL_ICONS.length],
+            color: PROFILE_COLORS[state.profiles.length % PROFILE_COLORS.length],
+          }) : editingProfile}
+          isNew={editingProfile.isNew}
+          onCancel={() => setEditingProfile(null)}
+          onSave={(data) => {
+            update(s => {
+              const p = freshProfile(Object.assign({}, data));
+              s.profiles.push(p);
+              s.activeProfileId = p.id;
+            });
+            setEditingProfile(null);
+          }}
+        />
+      );
+    }
+    return (
+      <ProfileSelectScreen
+        profiles={state.profiles}
+        onSelect={(id) => update(s => { s.activeProfileId = id; })}
+        onCreateNew={() => setEditingProfile({ isNew: true })}
+      />
+    );
+  }
+
+  function handleQuestComplete(questId, stage) {
+    let result;
+    const next = update(s => {
+      result = completeQuestStage(s, activeProfile.id, questId, stage);
+    });
+    if (result.alreadyDone) return;
+    const newLevel = next.profiles.find(p => p.id === activeProfile.id).level;
+    if (result.leveledUp) pushToast(`🎉 Level Up! ${activeProfile.name} ist jetzt Level ${newLevel}.`, 'levelup');
+    pushToast(
+      result.actionGranted ? `Quest erledigt! +${result.xpGained} XP, +1 Kampf-Aktion` : `Quest erledigt! +${result.xpGained} XP`,
+      'info'
+    );
+  }
+
+  function handleUseAbility(profileId, abilityId) {
+    let outcome;
+    update(s => { outcome = useAbility(s, profileId, abilityId); });
+    if (outcome && !outcome.ok) {
+      if (outcome.reason === 'cooldown') pushToast('Diese Fähigkeit ist noch auf Abklingzeit.', 'error');
+      else if (outcome.reason === 'no_actions') pushToast('Keine Kampf-Aktionen übrig — erst Quests abschließen.', 'error');
+      else if (outcome.reason === 'locked') pushToast('Diese Fähigkeit ist noch nicht freigeschaltet.', 'error');
+    }
+  }
+
+  function handleAddQuest(q) {
+    update(s => {
+      s.quests.push({ id: uid('quest'), title: q.title, xp: q.xp, icon: q.icon, category: q.category, custom: true });
+      if (!s.questCategories.includes(q.category)) s.questCategories.push(q.category);
+    });
+  }
+
+  function handleDeleteQuests(ids) {
+    update(s => { s.quests = s.quests.filter(q => !ids.includes(q.id)); });
+    pushToast(ids.length > 1 ? `${ids.length} Aufgaben gelöscht.` : 'Aufgabe gelöscht.', 'info');
+  }
+
+  function handleAddCalendarItem(data) {
+    update(s => {
+      if (!s.calendarItems) s.calendarItems = [];
+      s.calendarItems.push({
+        id: uid('cal'), kind: data.kind, title: data.title, icon: data.icon, date: data.date,
+        recurrence: data.recurrence, carryForward: data.carryForward, occurrences: {},
+      });
+    });
+    pushToast(data.kind === 'aufgabe' ? 'Aufgabe hinzugefügt.' : 'Termin hinzugefügt.', 'info');
+  }
+
+  function handleEditCalendarItem(data) {
+    update(s => {
+      const item = (s.calendarItems || []).find(i => i.id === data.id);
+      if (!item) return;
+      item.kind = data.kind; item.title = data.title; item.date = data.date;
+      item.icon = data.icon; item.recurrence = data.recurrence; item.carryForward = data.carryForward;
+    });
+    pushToast('Gespeichert.', 'info');
+  }
+
+  function handleSaveCalendarItem(data) {
+    if (data.id) handleEditCalendarItem(data);
+    else handleAddCalendarItem(data);
+    setCalendarModal(null);
+  }
+
+  function handleCalendarComplete(itemId, scheduledDate) {
+    let result;
+    update(s => { result = completeCalendarItem(s, activeProfile.id, itemId, scheduledDate); });
+    if (!result) return;
+    pushToast(result.xpGained > 0 ? `Aufgabe erledigt! +${result.xpGained} XP` : 'Aufgabe erledigt! (Tages-XP-Limit erreicht)', 'info');
+  }
+
+  function handleDeleteCalendarItem(itemId) {
+    update(s => { s.calendarItems = (s.calendarItems || []).filter(i => i.id !== itemId); });
+    setCalendarModal(null);
+    pushToast('Gelöscht.', 'info');
+  }
+
+  function handleAddShopItem(category, item) {
+    update(s => { s.shop[category].push({ id: uid('shop'), title: item.title, cost: item.cost, icon: item.icon, custom: true }); });
+  }
+
+  function handleDeleteShopItems(keys) {
+    update(s => {
+      keys.forEach(key => {
+        const sep = key.indexOf(':');
+        const category = key.slice(0, sep);
+        const id = key.slice(sep + 1);
+        if (s.shop[category]) s.shop[category] = s.shop[category].filter(item => item.id !== id);
+      });
+    });
+    pushToast(keys.length > 1 ? `${keys.length} Items gelöscht.` : 'Item gelöscht.', 'info');
+  }
+
+  function handleBuy(item, category, buyerPaid) {
+    if (!partnerProfile) return;
+    const partnerPaid = category === 'gemeinsam' ? item.cost - buyerPaid : 0;
+    update(s => {
+      const buyer = s.profiles.find(p => p.id === activeProfile.id);
+      const partner = s.profiles.find(p => p.id === partnerProfile.id);
+      buyer.gold -= buyerPaid;
+      if (category === 'gemeinsam') partner.gold -= partnerPaid;
+      s.pendingConfirmations.push({
+        id: uid('confirm'), category, itemId: item.id, title: item.title, icon: item.icon, cost: item.cost,
+        buyerId: buyer.id, partnerId: partner.id, buyerPaid, partnerPaid,
+      });
+      addLog(s, `🛒 ${buyer.name} möchte "${item.title}" kaufen — Bestätigung von ${partner.name} ausstehend.`);
+    });
+    pushToast('Kaufanfrage gesendet — Bestätigung steht aus.', 'info');
+  }
+
+  function handleConfirm(confirmId) {
+    update(s => {
+      const c = s.pendingConfirmations.find(x => x.id === confirmId);
+      if (!c) return;
+      const item = { id: uid('inv'), title: c.title, icon: c.icon, done: false };
+      if (c.category === 'geschenk') {
+        const partner = s.profiles.find(p => p.id === c.partnerId);
+        partner.inventory.push(item);
+      } else {
+        s.sharedInventory.push(item);
+      }
+      s.pendingConfirmations = s.pendingConfirmations.filter(x => x.id !== confirmId);
+      addLog(s, `✅ Kauf "${c.title}" bestätigt.`);
+    });
+    pushToast('Bestätigt!', 'info');
+  }
+
+  function handleDecline(confirmId) {
+    update(s => {
+      const c = s.pendingConfirmations.find(x => x.id === confirmId);
+      if (!c) return;
+      const buyer = s.profiles.find(p => p.id === c.buyerId);
+      const partner = s.profiles.find(p => p.id === c.partnerId);
+      buyer.gold += c.buyerPaid;
+      if (c.category === 'gemeinsam') partner.gold += c.partnerPaid;
+      s.pendingConfirmations = s.pendingConfirmations.filter(x => x.id !== confirmId);
+      addLog(s, `❌ Kauf "${c.title}" abgelehnt — Gold wurde zurückerstattet.`);
+    });
+    pushToast('Abgelehnt — Gold zurückerstattet.', 'info');
+  }
+
+  function handleMarkInventoryDone(scope, itemId) {
+    update(s => {
+      if (scope === 'personal') {
+        const p = s.profiles.find(pr => pr.id === activeProfile.id);
+        const item = p.inventory.find(i => i.id === itemId);
+        if (item) item.done = true;
+      } else {
+        const item = s.sharedInventory.find(i => i.id === itemId);
+        if (item) item.done = true;
+      }
+    });
+  }
+
+  function handleSetItemDate(scope, itemId, date) {
+    update(s => {
+      if (scope === 'personal') {
+        const p = s.profiles.find(pr => pr.id === activeProfile.id);
+        const item = p.inventory.find(i => i.id === itemId);
+        if (item) item.plannedDate = date || null;
+      } else {
+        const item = s.sharedInventory.find(i => i.id === itemId);
+        if (item) item.plannedDate = date || null;
+      }
+    });
+  }
+
+  function handleExport() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `teamquest-export-${todayBerlin()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function handleImport(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        if (!imported || !Array.isArray(imported.profiles)) throw new Error('Ungültiges Format');
+        setState(imported);
+        pushToast('Stand importiert!', 'info');
+      } catch (err) {
+        pushToast('Import fehlgeschlagen: ungültige Datei.', 'error');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  const myConfirmCount = state.pendingConfirmations.filter(c => c.partnerId === activeProfile.id).length;
+  const todayAgendaForBadge = getTodayAgenda(state, todayBerlin());
+  const calendarBadgeCount = todayAgendaForBadge.filter(e => !e.done).length;
+  const calendarViewedDate = calendarSelectedDate || todayBerlin();
+  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin());
+  const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30);
+  const plannedItemDates = new Set([
+    ...(activeProfile.inventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
+    ...(state.sharedInventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
+  ]);
+
+  return (
+    <div className="max-w-md mx-auto min-h-screen relative">
+      <ToastStack toasts={toasts} />
+
+      <div className="sticky top-0 z-30 bg-bgElevated/95 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between relative">
+        <div className="font-display font-bold text-gold text-base tracking-wide flex items-center gap-1.5">
+          TeamQuest
+          <ConnectionDot status={connStatus} />
+        </div>
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+          <span className="text-lg">💰</span>
+          <span className="font-stat text-xl text-gold font-bold leading-none">{activeProfile.gold}</span>
+        </div>
+        <button onClick={() => update(s => { s.activeProfileId = null; })} className="flex items-center gap-2" aria-label="Profil wechseln">
+          <div className="text-xs text-gold font-stat font-semibold flex items-center gap-1">
+            <span>⭐</span>
+            <span>Lvl {activeProfile.level}</span>
+          </div>
+          <ProfileAvatar profile={activeProfile} size={32} />
+        </button>
+      </div>
+
+      {activeTab === 'quests' && (
+        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests}
+          onCalendarComplete={handleCalendarComplete}
+          onOpenAddCalendar={() => setCalendarModal({ mode: 'add', date: todayBerlin() })}
+          onOpenEditCalendar={(item) => setCalendarModal({ mode: 'edit', item })} />
+      )}
+      {activeTab === 'kampf' && (
+        <CombatTab state={state} profiles={state.profiles} activeProfileId={activeProfile.id} onUseAbility={handleUseAbility} />
+      )}
+      {activeTab === 'shop' && partnerProfile && (
+        <ShopTab state={state} profile={activeProfile} partner={partnerProfile}
+          onBuy={handleBuy} onAddShopItem={handleAddShopItem} onDeleteShopItems={handleDeleteShopItems}
+          onConfirm={handleConfirm} onDecline={handleDecline} />
+      )}
+      {activeTab === 'shop' && !partnerProfile && (
+        <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">Der Shop braucht ein zweites Profil.</div>
+      )}
+      {activeTab === 'kalender' && (
+        <div className="px-4 pt-4 pb-28 space-y-4">
+          <div className="font-display text-lg font-bold text-ink">📅 Kalender</div>
+          <CalendarGrid profile={activeProfile} quests={state.quests} calendarItems={state.calendarItems}
+            plannedItemDates={plannedItemDates}
+            selectedDate={calendarSelectedDate} onSelectDate={setCalendarSelectedDate} />
+          <button onClick={() => setCalendarModal({ mode: 'add', date: calendarViewedDate })}
+            className="w-full border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
+            + Aufgabe / Termin hinzufügen
+          </button>
+          <div className="bg-surface border border-border rounded-2xl p-4">
+            <SectionLabel>
+              {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDate(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
+            </SectionLabel>
+            {dayAgendaForCalendarTab.length === 0 ? (
+              <div className="text-xs text-inkDim">
+                {calendarViewedDate === todayBerlin() ? 'Keine Aufgaben oder Termine heute.' : 'Keine Aufgaben oder Termine an diesem Tag.'}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {dayAgendaForCalendarTab.map(entry => (
+                  <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry}
+                    onComplete={handleCalendarComplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
+                    actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
+                ))}
+              </div>
+            )}
+            <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+            <CompletionLogList entries={getCompletionLog(state, 100)} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+          </div>
+          <SelectedDayQuestsCard profile={activeProfile} quests={state.quests} selectedDate={calendarSelectedDate} />
+        </div>
+      )}
+      {calendarModal && (
+        <CalendarItemModal
+          editingItem={calendarModal.mode === 'edit' ? calendarModal.item : null}
+          defaultDate={calendarModal.mode === 'add' ? calendarModal.date : todayBerlin()}
+          onClose={() => setCalendarModal(null)}
+          onSave={handleSaveCalendarItem}
+          onDelete={handleDeleteCalendarItem}
+        />
+      )}
+      {activeTab === 'inventar' && (
+        <div className="px-4 pt-4 pb-28">
+          <div className="font-display text-lg font-bold text-ink mb-4">🎒 Inventar</div>
+          <InventoryList profile={activeProfile} sharedInventory={state.sharedInventory} onMarkDone={handleMarkInventoryDone} onSetDate={handleSetItemDate} />
+          <InventoryLogList profile={activeProfile} partner={partnerProfile} sharedInventory={state.sharedInventory} />
+        </div>
+      )}
+      {activeTab === 'mehr' && (
+        <MoreTab
+          state={state} profile={activeProfile}
+          pairingCode={pairingCode} connStatus={connStatus}
+          onSwitchProfile={() => update(s => { s.activeProfileId = null; })}
+          onEditProfile={(p) => setEditingProfile(p)}
+          onExport={handleExport} onImport={handleImport}
+          onUnpair={onUnpair}
+        />
+      )}
+
+      <BottomNav active={activeTab} setActive={setActiveTab} badges={{ shop: myConfirmCount, kalender: calendarBadgeCount }} />
+
+      {editingProfile && !editingProfile.isNew && (
+        <ProfileEditor
+          profile={editingProfile}
+          isNew={false}
+          onCancel={() => setEditingProfile(null)}
+          onSave={(data) => {
+            update(s => {
+              const p = s.profiles.find(pr => pr.id === editingProfile.id);
+              Object.assign(p, data);
+            });
+            setEditingProfile(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
