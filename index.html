@@ -715,6 +715,63 @@ function formatShortDateWithYear(dateStr) {
   return `${d}.${m}.${y}`;
 }
 
+// --- "Zum Handy-Kalender hinzufügen" (.ics-Export) ---------------------
+// Erzeugt eine Standard-Kalenderdatei für EIN konkretes Vorkommen eines
+// Termins/einer Aufgabe. Bei Uhrzeit wird zusätzlich eine Erinnerung
+// (VALARM) eingebettet, damit das Handy-Betriebssystem selbst benachrichtigt
+// — TeamQuest muss dafür nicht geöffnet sein.
+function icsLocalTimestamp(date) {
+  const p = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}T${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`;
+}
+function escapeIcsText(text) {
+  return String(text || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+function buildIcsForItem(item, scheduledDate) {
+  const hasTime = !!item.time;
+  let dtstartLine, dtendLine;
+  if (!hasTime) {
+    const startD = scheduledDate.replace(/-/g, '');
+    const endObj = new Date(scheduledDate + 'T00:00:00');
+    endObj.setDate(endObj.getDate() + 1);
+    const p = n => String(n).padStart(2, '0');
+    const endD = `${endObj.getFullYear()}${p(endObj.getMonth() + 1)}${p(endObj.getDate())}`;
+    dtstartLine = `DTSTART;VALUE=DATE:${startD}`;
+    dtendLine = `DTEND;VALUE=DATE:${endD}`;
+  } else {
+    const startObj = new Date(`${scheduledDate}T${item.time}:00`);
+    const endObj = new Date(startObj.getTime() + (item.durationMinutes || 60) * 60000);
+    dtstartLine = `DTSTART:${icsLocalTimestamp(startObj)}`;
+    dtendLine = `DTEND:${icsLocalTimestamp(endObj)}`;
+  }
+  let valarmBlock = '';
+  if (hasTime && item.reminderMinutes && item.reminderMinutes > 0) {
+    valarmBlock = `BEGIN:VALARM\r\nTRIGGER:-PT${item.reminderMinutes}M\r\nACTION:DISPLAY\r\nDESCRIPTION:${escapeIcsText(item.title)}\r\nEND:VALARM\r\n`;
+  }
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//TeamQuest//DE',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:${item.id}-${scheduledDate}@teamquest`,
+    `DTSTAMP:${icsLocalTimestamp(new Date())}`,
+    dtstartLine,
+    dtendLine,
+    `SUMMARY:${escapeIcsText(item.title)}`,
+  ].join('\r\n') + '\r\n' + valarmBlock + 'END:VEVENT\r\nEND:VCALENDAR\r\n';
+}
+function exportItemToCalendar(item, scheduledDate) {
+  const ics = buildIcsForItem(item, scheduledDate);
+  const dataUri = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+  const a = document.createElement('a');
+  a.href = dataUri;
+  a.download = (item.title || 'termin').replace(/[^a-z0-9äöüß]+/gi, '_').slice(0, 40) + '.ics';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function weekdayLabelFor(dateStr) {
   return WEEKDAY_LABELS[weekdayOfDateStr(dateStr)];
 }
@@ -898,7 +955,7 @@ function completeCalendarItem(state, profileId, itemId, scheduledDate) {
   const headroom = Math.max(0, CALENDAR_XP_DAILY_CAP - profile.calendarXpToday.amount);
   const gained = Math.min(CALENDAR_XP_PER_TASK, headroom);
 
-  item.occurrences[scheduledDate] = { done: true, doneDate: today, doneBy: profile.id };
+  item.occurrences[scheduledDate] = { done: true, doneDate: today, doneBy: profile.id, xpGained: gained };
   if (gained > 0) {
     grantXp(profile, gained);
     profile.calendarXpToday.amount += gained;
@@ -907,6 +964,29 @@ function completeCalendarItem(state, profileId, itemId, scheduledDate) {
     ? `📅 ${profile.name} erledigt „${item.title}" — +${gained} XP.`
     : `📅 ${profile.name} erledigt „${item.title}" (Tages-XP-Limit erreicht).`);
   return { xpGained: gained };
+}
+
+// Macht ein erledigtes Aufgaben-Vorkommen rückgängig ("verklickt"): nimmt genau
+// die dafür vergebene XP zurück (egal ob heute oder an einem früheren Tag
+// erledigt) und entfernt den Erledigt-Status wieder.
+function uncompleteCalendarItem(state, profileId, itemId, scheduledDate) {
+  const item = (state.calendarItems || []).find(i => i.id === itemId);
+  const profile = state.profiles.find(p => p.id === profileId);
+  if (!item || !profile || item.kind !== 'aufgabe') return { ok: false };
+  const occ = item.occurrences && item.occurrences[scheduledDate];
+  if (!occ || !occ.done) return { ok: false };
+
+  const gained = occ.xpGained || 0;
+  if (gained > 0) {
+    revokeXp(profile, gained);
+    if (profile.calendarXpToday && profile.calendarXpToday.date === occ.doneDate) {
+      profile.calendarXpToday.amount = Math.max(0, profile.calendarXpToday.amount - gained);
+    }
+  }
+  delete item.occurrences[scheduledDate];
+
+  addLog(state, `↩️ ${profile.name}: „${item.title}" rückgängig gemacht${gained > 0 ? ` — -${gained} XP` : ''}.`);
+  return { ok: true, xpRevoked: gained };
 }
 
 // Schadens-/Heileffekt auf den Boss anwenden, inkl. Sieg-Check.
@@ -1250,6 +1330,11 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   const [weekdays, setWeekdays] = useState(editingItem && editingItem.recurrence && editingItem.recurrence.type === 'weekly' ? editingItem.recurrence.weekdays : []);
   const [carryForward, setCarryForward] = useState(editingItem ? !!editingItem.carryForward : true);
   const [visibility, setVisibility] = useState(editingItem ? (editingItem.visibility || 'shared') : 'shared');
+  const [allDay, setAllDay] = useState(editingItem ? !editingItem.time : true);
+  const [time, setTime] = useState(editingItem && editingItem.time ? editingItem.time : '09:00');
+  const [durationMinutes, setDurationMinutes] = useState(editingItem && editingItem.durationMinutes ? editingItem.durationMinutes : 60);
+  const [reminderMinutes, setReminderMinutes] = useState(editingItem && typeof editingItem.reminderMinutes === 'number' ? editingItem.reminderMinutes : 60);
+  const [exportToCalendar, setExportToCalendar] = useState(editingItem ? editingItem.exportToCalendar !== false : true);
 
   function toggleWeekday(i) {
     setWeekdays(w => (w.includes(i) ? w.filter(x => x !== i) : [...w, i].sort()));
@@ -1278,6 +1363,10 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
       recurrence: buildRecurrence(),
       carryForward: kind === 'aufgabe' ? carryForward : false,
       visibility,
+      time: allDay ? null : time,
+      durationMinutes: allDay ? null : durationMinutes,
+      reminderMinutes: allDay ? null : reminderMinutes,
+      exportToCalendar,
     });
   }
 
@@ -1366,6 +1455,65 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${visibility !== 'private' ? 'left-5' : 'left-0.5'}`}></span>
           </button>
         </div>
+        <div>
+          <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+            <div className="pr-3">
+              <div className="text-sm text-ink">Ganztägig</div>
+              <div className="text-[10px] text-inkDim">Aus = eigene Uhrzeit für diesen Eintrag festlegen.</div>
+            </div>
+            <button onClick={() => setAllDay(a => !a)}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${allDay ? 'bg-gold' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${allDay ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+          {!allDay && (
+            <div className="flex gap-3 mt-2.5">
+              <div className="flex-1">
+                <SectionLabel>Uhrzeit</SectionLabel>
+                <input type="time" value={time} onChange={e => setTime(e.target.value)}
+                  className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
+              </div>
+              <div className="flex-1">
+                <SectionLabel>Dauer</SectionLabel>
+                <select value={durationMinutes} onChange={e => setDurationMinutes(Number(e.target.value))}
+                  className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink">
+                  <option value={15}>15 Min</option>
+                  <option value={30}>30 Min</option>
+                  <option value={45}>45 Min</option>
+                  <option value={60}>1 Std</option>
+                  <option value={90}>1,5 Std</option>
+                  <option value={120}>2 Std</option>
+                  <option value={180}>3 Std</option>
+                  <option value={240}>4 Std</option>
+                </select>
+              </div>
+            </div>
+          )}
+          {!allDay && (
+            <div className="mt-2.5">
+              <SectionLabel>Erinnerung</SectionLabel>
+              <select value={reminderMinutes} onChange={e => setReminderMinutes(Number(e.target.value))}
+                className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink">
+                <option value={0}>Keine</option>
+                <option value={15}>15 Minuten vorher</option>
+                <option value={30}>30 Minuten vorher</option>
+                <option value={60}>1 Stunde vorher</option>
+                <option value={120}>2 Stunden vorher</option>
+                <option value={1440}>1 Tag vorher</option>
+              </select>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+          <div className="pr-3">
+            <div className="text-sm text-ink">In Handy-Kalender exportierbar</div>
+            <div className="text-[10px] text-inkDim">Aus = kein "Zum Kalender hinzufügen"-Knopf für diesen Eintrag.</div>
+          </div>
+          <button onClick={() => setExportToCalendar(v => !v)}
+            className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${exportToCalendar ? 'bg-gold' : 'bg-border'}`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${exportToCalendar ? 'left-5' : 'left-0.5'}`}></span>
+          </button>
+        </div>
         <button disabled={!canSave} onClick={handleSave}
           className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
           {isEdit ? 'Speichern' : 'Hinzufügen'}
@@ -1381,25 +1529,41 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   );
 }
 
-function AgendaItemRow({ entry, profiles, onComplete, onEdit, actionable, showDate }) {
+function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate }) {
   const { item, scheduledDate, done, overdue } = entry;
   const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
   const escalated = overdue >= 7 ? 'hp' : overdue >= 3 ? 'orange' : null;
   const creator = (profiles || []).find(p => p.id === item.creatorId) || null;
+  const isAufgabe = item.kind === 'aufgabe';
 
   return (
     <div className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
       done ? 'border-border bg-surface/40 opacity-60' :
-      escalated === 'hp' ? 'border-hp/60 bg-hp/5' :
-      escalated === 'orange' ? 'border-orange/60 bg-orange/5' :
-      'border-border bg-surface'
+      escalated === 'hp' ? 'border-hp/70 bg-hp/10' :
+      escalated === 'orange' ? 'border-orange/70 bg-orange/10' :
+      isAufgabe ? 'border-orange/35 bg-orange/5' :
+      'border-shield/35 bg-shield/5'
     } ${grayedOut ? 'opacity-50' : ''}`}>
+      {isAufgabe && (
+        <button
+          onClick={actionable ? () => (done ? onUncomplete(item.id, scheduledDate) : onComplete(item.id, scheduledDate)) : undefined}
+          disabled={!actionable}
+          aria-label={done ? 'Als nicht erledigt markieren (XP wird zurückgenommen)' : 'Als erledigt markieren'}
+          title={done ? 'Verklickt? Hier wieder entklicken' : 'Erledigt'}
+          className={`w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 transition-transform ${
+            done ? 'bg-heal border-heal text-bg' : 'border-border bg-bgElevated'
+          } ${actionable ? 'active:scale-90' : 'opacity-60'}`}
+        >
+          {done && <span className="text-xs font-bold leading-none">✓</span>}
+        </button>
+      )}
       <button onClick={() => onEdit(item)} className="flex items-center gap-2.5 flex-1 min-w-0 text-left active:opacity-70">
         <span className="text-lg shrink-0">{item.icon}</span>
         <div className="flex-1 min-w-0">
           <div className={`text-sm truncate ${done ? 'line-through text-inkDim' : 'text-ink'}`}>{item.title}</div>
           <div className="text-[10px] text-inkDim flex items-center gap-1.5 flex-wrap">
             <span>{item.kind === 'termin' ? 'Termin' : 'Aufgabe'}</span>
+            {item.time && <span>· {item.time}</span>}
             {showDate && <span>· {formatShortDate(scheduledDate)} {weekdayLabelFor(scheduledDate)}</span>}
             {grayedOut && <span>· nicht erledigt</span>}
             {overdue > 0 && (
@@ -1408,26 +1572,28 @@ function AgendaItemRow({ entry, profiles, onComplete, onEdit, actionable, showDa
               </span>
             )}
             {item.visibility === 'private' && <span title="Nur für dich sichtbar">🔒</span>}
-            {creator && (
-              <span className="ml-auto flex items-center gap-0.5 text-inkDim/70 shrink-0" title={`Erstellt von ${creator.name}`}>
-                {creator.icon} {creator.name}
-              </span>
-            )}
           </div>
         </div>
       </button>
-      {item.kind === 'aufgabe' && !done && actionable && (
-        <button onClick={() => onComplete(item.id, scheduledDate)}
-          className="text-xs font-semibold rounded-lg px-2.5 py-2 border border-heal/50 bg-heal/10 text-heal shrink-0 active:scale-95 transition-transform">
-          ✓ Fertig
-        </button>
-      )}
-      {done && <span className="text-heal text-base shrink-0 pr-1">✓</span>}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {creator && (
+          <span className="flex items-center gap-0.5 text-[10px] text-inkDim/70" title={`Erstellt von ${creator.name}`}>
+            {creator.icon} {creator.name}
+          </span>
+        )}
+        {item.exportToCalendar !== false && (
+          <button onClick={(e) => { e.stopPropagation(); exportItemToCalendar(item, scheduledDate); }}
+            title="Zum Handy-Kalender hinzufügen" aria-label="Zum Handy-Kalender hinzufügen"
+            className="text-sm rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
+            📆
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-function TodayAgendaCard({ entries, profiles, onComplete, onEdit, onAddClick }) {
+function TodayAgendaCard({ entries, profiles, onComplete, onUncomplete, onEdit, onAddClick }) {
   return (
     <div className="bg-surface border border-border rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -1440,7 +1606,7 @@ function TodayAgendaCard({ entries, profiles, onComplete, onEdit, onAddClick }) 
         <div className="space-y-2">
           {entries.map(entry => (
             <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={profiles}
-              onComplete={onComplete} onEdit={onEdit} actionable showDate={false} />
+              onComplete={onComplete} onUncomplete={onUncomplete} onEdit={onEdit} actionable showDate={false} />
           ))}
         </div>
       )}
@@ -1849,7 +2015,7 @@ function QuestCategorySection({ category, quests, todayProgress, onComplete, onU
   );
 }
 
-function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onCalendarComplete, onOpenAddCalendar, onOpenEditCalendar }) {
+function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onCalendarComplete, onCalendarUncomplete, onOpenAddCalendar, onOpenEditCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const today = todayBerlin();
@@ -1870,6 +2036,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
         entries={todayAgenda}
         profiles={state.profiles}
         onComplete={onCalendarComplete}
+        onUncomplete={onCalendarUncomplete}
         onEdit={onOpenEditCalendar}
         onAddClick={onOpenAddCalendar}
       />
@@ -3034,6 +3201,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         id: uid('cal'), kind: data.kind, title: data.title, icon: data.icon, date: data.date,
         recurrence: data.recurrence, carryForward: data.carryForward, occurrences: {},
         creatorId: activeProfile.id, visibility: data.visibility || 'shared',
+        time: data.time || null, durationMinutes: data.durationMinutes || null,
+        reminderMinutes: data.reminderMinutes || null, exportToCalendar: data.exportToCalendar !== false,
       });
     });
     pushToast(data.kind === 'aufgabe' ? 'Aufgabe hinzugefügt.' : 'Termin hinzugefügt.', 'info');
@@ -3046,6 +3215,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       item.kind = data.kind; item.title = data.title; item.date = data.date;
       item.icon = data.icon; item.recurrence = data.recurrence; item.carryForward = data.carryForward;
       item.visibility = data.visibility || 'shared';
+      item.time = data.time || null; item.durationMinutes = data.durationMinutes || null;
+      item.reminderMinutes = data.reminderMinutes || null; item.exportToCalendar = data.exportToCalendar !== false;
     });
     pushToast('Gespeichert.', 'info');
   }
@@ -3061,6 +3232,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     update(s => { result = completeCalendarItem(s, activeProfile.id, itemId, scheduledDate); });
     if (!result) return;
     pushToast(result.xpGained > 0 ? `Aufgabe erledigt! +${result.xpGained} XP` : 'Aufgabe erledigt! (Tages-XP-Limit erreicht)', 'info');
+  }
+
+  function handleCalendarUncomplete(itemId, scheduledDate) {
+    let result;
+    update(s => { result = uncompleteCalendarItem(s, activeProfile.id, itemId, scheduledDate); });
+    if (!result || !result.ok) return;
+    pushToast(result.xpRevoked > 0 ? `Rückgängig gemacht — -${result.xpRevoked} XP` : 'Rückgängig gemacht.', 'info');
   }
 
   function handleDeleteCalendarItem(itemId) {
@@ -3185,9 +3363,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   const myConfirmCount = state.pendingConfirmations.filter(c => c.partnerId === activeProfile.id).length;
   const todayAgendaForBadge = getTodayAgenda(state, todayBerlin(), activeProfile.id);
-  const calendarBadgeCount = todayAgendaForBadge.filter(e => !e.done).length;
+  const calendarBadgeCount = todayAgendaForBadge.filter(e => !e.done && e.item.kind === 'aufgabe').length;
   const calendarViewedDate = calendarSelectedDate || todayBerlin();
-  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id);
+  // Nur im Tagesblick (Kalender-Tab):
+  // 1. Erledigtes rutscht ganz nach unten.
+  // 2. Innerhalb dessen: Einträge MIT Uhrzeit zuerst, aufsteigend sortiert (früheste zuerst).
+  // 3. Ganztägige Einträge danach, untereinander in unveränderter Reihenfolge (stabil).
+  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id)
+    .slice()
+    .sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      const aHasTime = !!a.item.time, bHasTime = !!b.item.time;
+      if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
+      if (aHasTime && bHasTime) return a.item.time < b.item.time ? -1 : a.item.time > b.item.time ? 1 : 0;
+      return 0;
+    });
   const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30, activeProfile.id);
   const plannedItemDates = new Set([
     ...(activeProfile.inventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
@@ -3219,6 +3409,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       {activeTab === 'quests' && (
         <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests}
           onCalendarComplete={handleCalendarComplete}
+          onCalendarUncomplete={handleCalendarUncomplete}
           onOpenAddCalendar={() => setCalendarModal({ mode: 'add', date: todayBerlin() })}
           onOpenEditCalendar={(item) => setCalendarModal({ mode: 'edit', item })} />
       )}
@@ -3255,7 +3446,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               <div className="space-y-2">
                 {dayAgendaForCalendarTab.map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
-                    onComplete={handleCalendarComplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
+                    onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
                     actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
                 ))}
               </div>
