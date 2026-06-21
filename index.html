@@ -2287,10 +2287,10 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                 key={i}
                 onClick={() => onSelectDate(isSelected ? null : dateStr)}
                 className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
-                  isSelected ? 'bg-gold/15 border-gold' : 'bg-surface border-border'
-                } ${isToday ? 'ring-2 ring-goldBright ring-offset-1 ring-offset-bg' : ''}`}
+                  isSelected ? 'bg-gold/15 border-gold' : isToday ? 'bg-shield/20 border-shield' : 'bg-surface border-border'
+                }`}
               >
-                <span className={isToday ? 'text-goldBright font-bold' : 'text-inkDim'}>{d}</span>
+                <span className={isToday ? 'text-shield font-bold' : 'text-inkDim'}>{d}</span>
                 <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
                   {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
@@ -2828,6 +2828,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [editingProfile, setEditingProfile] = useState(null);
   const [calendarModal, setCalendarModal] = useState(null); // null | { mode: 'add', date } | { mode: 'edit', item }
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(null); // im Kalender-Tab angeklickter Tag (null = heute)
+
+  // Sobald man den Kalender-Tab verlässt, die Tagesauswahl zurücksetzen — beim
+  // nächsten Aufruf des Kalenders soll wieder nichts ausgewählt sein (Standard: heute).
+  useEffect(() => {
+    if (activeTab !== 'kalender') setCalendarSelectedDate(null);
+  }, [activeTab]);
   // Geräte-lokal: welches der (max. zwei) Profile wird auf DIESEM Handy angezeigt.
   const [activeProfileId, setActiveProfileId] = useState(() => getStoredActiveProfileId());
 
