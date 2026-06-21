@@ -1736,7 +1736,7 @@ function QuestCard({ quest, stage, onComplete, onUncomplete, locked }) {
       <div className="flex-1 min-w-0">
         <button
           onClick={() => setExpanded(e => !e)}
-          className={`text-sm font-medium text-ink text-left ${expanded ? '' : 'truncate'}`}
+          className={`block w-full text-sm font-medium text-ink text-left ${expanded ? 'whitespace-normal break-words' : 'truncate'}`}
         >
           {quest.title}
         </button>
@@ -2200,6 +2200,27 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
 
 function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate }) {
   const [monthOffset, setMonthOffset] = useState(0);
+  const touchStartRef = useRef(null);
+
+  // Wisch-Geste: nach links wischen = nächster Monat, nach rechts wischen = vorheriger Monat.
+  // Nur reagieren, wenn die Bewegung deutlich horizontaler als vertikaler Natur ist
+  // (sonst würde normales Scrollen versehentlich den Monat wechseln).
+  function handleTouchStart(e) {
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+  }
+  function handleTouchEnd(e) {
+    if (!touchStartRef.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartRef.current.x;
+    const dy = t.clientY - touchStartRef.current.y;
+    touchStartRef.current = null;
+    const SWIPE_THRESHOLD = 45;
+    if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      setMonthOffset(o => (dx < 0 ? o + 1 : o - 1));
+    }
+  }
+
   const now = new Date();
   const ref = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
   const year = ref.getFullYear(), month = ref.getMonth();
@@ -2230,7 +2251,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
     : {};
 
   return (
-    <div>
+    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div className="flex items-center justify-between mb-2">
         <button onClick={() => setMonthOffset(o => o - 1)} className="text-inkDim px-2">‹</button>
         <div className="text-sm font-medium capitalize">{monthName}</div>
