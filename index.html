@@ -48,6 +48,7 @@
           heal: '#4a9b6e',
           shield: '#5b8fc7',
           orange: '#e0853c',
+          sport: '#9c6b47',
         },
         fontFamily: {
           display: ['Cinzel', 'serif'],
@@ -507,6 +508,8 @@ function freshProfile(overrides) {
     inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
     questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 40/Tag, +5 pro abgeschlossener 20XP-Quest)
+    sportTrackingEnabled: false, // Extra-Funktion, nur für dieses Profil ein-/ausschaltbar
+    sportLog: {},                // { 'YYYY-MM-DD': { calories: number|null, protein: number|null } }
   }, overrides || {});
 }
 
@@ -770,6 +773,46 @@ function exportItemToCalendar(item, scheduledDate) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+// Wertet das Sport-Tracking-Protokoll eines Profils aus: Protein pro kg
+// Körpergewicht und Kalorien (jeweils Ø letzte 7 Tage) sowie den
+// Gewichtsverlauf der letzten 30 Tage für die Grafik.
+function computeSportAnalysis(profile) {
+  const today = todayBerlin();
+  const weekStart = addDaysToDateStr(today, -6);
+  const sportLog = profile.sportLog || {};
+
+  let proteinSum = 0, proteinDays = 0;
+  let caloriesSum = 0, caloriesDays = 0;
+  let weightSumWeek = 0, weightDaysWeek = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysToDateStr(weekStart, i);
+    const entry = sportLog[d];
+    if (!entry) continue;
+    if (entry.protein != null) { proteinSum += entry.protein; proteinDays++; }
+    if (entry.calories != null) { caloriesSum += entry.calories; caloriesDays++; }
+    if (entry.weight != null) { weightSumWeek += entry.weight; weightDaysWeek++; }
+  }
+  const avgProtein = proteinDays > 0 ? proteinSum / proteinDays : null;
+  const avgCalories = caloriesDays > 0 ? caloriesSum / caloriesDays : null;
+
+  // Repräsentatives Gewicht für die Protein/kg-Berechnung: Ø dieser Woche,
+  // sonst der letzte davor bekannte Wert (falls diese Woche nichts erfasst wurde).
+  let representativeWeight = weightDaysWeek > 0 ? weightSumWeek / weightDaysWeek : null;
+  if (representativeWeight == null) {
+    const priorDates = Object.keys(sportLog).filter(d => d < weekStart && sportLog[d].weight != null).sort();
+    if (priorDates.length > 0) representativeWeight = sportLog[priorDates[priorDates.length - 1]].weight;
+  }
+  const proteinPerKg = (avgProtein != null && representativeWeight) ? avgProtein / representativeWeight : null;
+
+  const chartStart = addDaysToDateStr(today, -29);
+  const weightSeries = Object.keys(sportLog)
+    .filter(d => d >= chartStart && d <= today && sportLog[d].weight != null)
+    .sort()
+    .map(d => ({ date: d, weight: sportLog[d].weight }));
+
+  return { avgProtein, avgCalories, proteinPerKg, representativeWeight, weightSeries, proteinDays, caloriesDays };
 }
 
 function weekdayLabelFor(dateStr) {
@@ -1319,6 +1362,166 @@ function SectionLabel({ children }) {
 }
 
 /* ----- Kalender: Aufgaben & Termine — UI ----- */
+
+// Einfacher SVG-Liniengraph für den Körpergewichts-Verlauf (kein externes
+// Chart-Paket nötig — die Datei bleibt ein einzelnes, abhängigkeitsfreies HTML).
+function WeightChart({ series }) {
+  const [activeIdx, setActiveIdx] = useState(null);
+
+  if (series.length < 2) {
+    return (
+      <div className="bg-surface border border-border rounded-xl p-4 text-xs text-inkDim text-center">
+        Noch nicht genug Einträge für einen Verlauf — trag dein Gewicht an mindestens zwei verschiedenen Tagen ein.
+      </div>
+    );
+  }
+  const W = 320, H = 170;
+  const PAD_L = 36, PAD_R = 12, PAD_T = 14, PAD_B = 26;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+
+  const weights = series.map(p => p.weight);
+  const rawMin = Math.min(...weights), rawMax = Math.max(...weights);
+  const pad = Math.max(0.5, (rawMax - rawMin) * 0.2);
+  const minW = rawMin - pad, maxW = rawMax + pad;
+  const range = (maxW - minW) || 1;
+
+  const firstDate = series[0].date, lastDate = series[series.length - 1].date;
+  const totalDays = Math.max(1, daysBetweenDateStrs(firstDate, lastDate));
+
+  const points = series.map(p => ({
+    x: PAD_L + (daysBetweenDateStrs(firstDate, p.date) / totalDays) * plotW,
+    y: PAD_T + plotH - ((p.weight - minW) / range) * plotH,
+    weight: p.weight,
+    date: p.date,
+  }));
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+
+  const yTicks = [0, 0.5, 1].map(f => minW + f * range);
+  const maxLabels = 5;
+  const labelStep = Math.max(1, Math.ceil(series.length / maxLabels));
+  const xLabelIndices = series.map((_, i) => i).filter(i => i === 0 || i === series.length - 1 || i % labelStep === 0);
+
+  const active = activeIdx != null ? points[activeIdx] : null;
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-3">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto select-none">
+        {yTicks.map((val, i) => {
+          const y = PAD_T + plotH - ((val - minW) / range) * plotH;
+          return (
+            <g key={i}>
+              <line x1={PAD_L} y1={y} x2={W - PAD_R} y2={y} stroke="#473d57" strokeWidth="1" strokeDasharray="3,3" />
+              <text x={PAD_L - 5} y={y + 3} fontSize="8" fill="#a9988a" textAnchor="end">{val.toFixed(1)}</text>
+            </g>
+          );
+        })}
+        <line x1={PAD_L} y1={PAD_T + plotH} x2={W - PAD_R} y2={PAD_T + plotH} stroke="#473d57" strokeWidth="1.2" />
+        <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T + plotH} stroke="#473d57" strokeWidth="1.2" />
+        {xLabelIndices.map(i => (
+          <text key={i} x={points[i].x} y={H - 8} fontSize="8" fill="#a9988a" textAnchor="middle">
+            {formatShortDate(series[i].date)}
+          </text>
+        ))}
+        <path d={pathD} fill="none" stroke="#9c6b47" strokeWidth="2" />
+        {points.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={activeIdx === i ? 5 : 3}
+            fill={activeIdx === i ? '#d4a843' : '#9c6b47'}
+            stroke={activeIdx === i ? '#15121e' : 'none'} strokeWidth={activeIdx === i ? 1.5 : 0}
+            onClick={() => setActiveIdx(activeIdx === i ? null : i)}
+            style={{ cursor: 'pointer' }} />
+        ))}
+      </svg>
+      <div className="text-center text-[11px] mt-1 h-4">
+        {active
+          ? <span className="text-gold font-semibold">{formatShortDateWithYear(active.date)} · {active.weight} kg</span>
+          : <span className="text-inkDim">Punkt antippen für Details</span>}
+      </div>
+    </div>
+  );
+}
+
+function SportAnalysisModal({ profile, onClose }) {
+  const a = computeSportAnalysis(profile);
+  return (
+    <Modal title="📊 Sport-Analyse" onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-surface border border-border rounded-xl p-3">
+            <div className="text-[10px] text-inkDim uppercase tracking-wide">Protein / kg Gewicht</div>
+            <div className="text-xl font-stat font-bold text-sport mt-1">
+              {a.proteinPerKg != null ? `${a.proteinPerKg.toFixed(2)} g/kg` : '–'}
+            </div>
+            <div className="text-[10px] text-inkDim mt-1">Ø letzte 7 Tage</div>
+          </div>
+          <div className="bg-surface border border-border rounded-xl p-3">
+            <div className="text-[10px] text-inkDim uppercase tracking-wide">Kalorien</div>
+            <div className="text-xl font-stat font-bold text-orange mt-1">
+              {a.avgCalories != null ? `${Math.round(a.avgCalories)} kcal` : '–'}
+            </div>
+            <div className="text-[10px] text-inkDim mt-1">Ø letzte 7 Tage</div>
+          </div>
+        </div>
+        {(a.proteinPerKg == null || a.avgCalories == null) && (
+          <div className="text-[10px] text-inkDim leading-relaxed">
+            Für genauere Werte einfach in den letzten 7 Tagen regelmäßiger Kalorien und Protein eintragen{a.representativeWeight == null ? ' (und mindestens einmal das Körpergewicht)' : ''}.
+          </div>
+        )}
+        <div>
+          <SectionLabel>Körpergewicht-Verlauf (letzte 30 Tage)</SectionLabel>
+          <WeightChart series={a.weightSeries} />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function SportTrackModal({ date, existing, onSave, onDelete, onClose }) {
+  const [calories, setCalories] = useState(existing && existing.calories != null ? String(existing.calories) : '');
+  const [protein, setProtein] = useState(existing && existing.protein != null ? String(existing.protein) : '');
+  const [weight, setWeight] = useState(existing && existing.weight != null ? String(existing.weight) : '');
+  const hasExisting = !!(existing && (existing.calories != null || existing.protein != null || existing.weight != null));
+
+  function handleSave() {
+    onSave({
+      calories: calories.trim() === '' ? null : Number(calories),
+      protein: protein.trim() === '' ? null : Number(protein),
+      weight: weight.trim() === '' ? null : Number(weight),
+    });
+  }
+
+  return (
+    <Modal title={`🏋️ Sport-Tracking · ${formatShortDateWithYear(date)}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Kalorien</SectionLabel>
+          <input type="number" inputMode="numeric" value={calories} onChange={e => setCalories(e.target.value)}
+            placeholder="z. B. 2200" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
+        </div>
+        <div>
+          <SectionLabel>Protein (g)</SectionLabel>
+          <input type="number" inputMode="numeric" value={protein} onChange={e => setProtein(e.target.value)}
+            placeholder="z. B. 140" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
+        </div>
+        <div>
+          <SectionLabel>Körpergewicht (kg)</SectionLabel>
+          <input type="number" inputMode="decimal" step="0.1" value={weight} onChange={e => setWeight(e.target.value)}
+            placeholder="z. B. 78,5" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
+        </div>
+        <button onClick={handleSave}
+          className="w-full bg-sport text-ink font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
+          Speichern
+        </button>
+        {hasExisting && (
+          <button onClick={() => onDelete(date)}
+            className="w-full border border-hp/40 text-hp text-sm rounded-xl py-2.5 active:scale-[0.98] transition-transform">
+            🗑️ Löschen
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}
 
 function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose }) {
   const isEdit = !!editingItem;
@@ -2412,11 +2615,21 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
 function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [slideDir, setSlideDir] = useState('right'); // Richtung der letzten Monats-Animation
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
   const touchStartRef = useRef(null);
 
   function goToMonth(delta) {
     setSlideDir(delta > 0 ? 'right' : 'left');
     setMonthOffset(o => o + delta);
+  }
+
+  // Direkt zu einem bestimmten Jahr/Monat springen (aus dem Monats-Picker).
+  function jumpToMonth(targetYear, targetMonth) {
+    const now = new Date();
+    const targetOffset = (targetYear - now.getFullYear()) * 12 + (targetMonth - now.getMonth());
+    setSlideDir(targetOffset >= monthOffset ? 'right' : 'left');
+    setMonthOffset(targetOffset);
+    setShowMonthPicker(false);
   }
 
   // Wisch-Geste: nach links wischen = nächster Monat, nach rechts wischen = vorheriger Monat.
@@ -2471,7 +2684,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
     <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <div className="flex items-center justify-between mb-2">
         <button onClick={() => goToMonth(-1)} className="text-inkDim px-2">‹</button>
-        <div className="text-sm font-medium capitalize">{monthName}</div>
+        <button onClick={() => setShowMonthPicker(true)} className="text-sm font-medium capitalize active:opacity-70">{monthName}</button>
         <button onClick={() => goToMonth(1)} className="text-inkDim px-2">›</button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-inkDim mb-1">
@@ -2484,9 +2697,11 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const dateStr = dateStrFor(d);
             const done = hasProgress(d);
             const dayEntries = calendarByDate[dateStr] || [];
-            const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe');
-            const hasTermin = dayEntries.some(e => e.item.kind === 'termin');
+            const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe' && !e.done);
+            const hasTermin = dayEntries.some(e => e.item.kind === 'termin' && !e.done);
             const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
+            const hasSport = profile.sportTrackingEnabled && !!(profile.sportLog && profile.sportLog[dateStr] &&
+              (profile.sportLog[dateStr].calories != null || profile.sportLog[dateStr].protein != null || profile.sportLog[dateStr].weight != null));
             const isSelected = selectedDate === dateStr;
             const isToday = dateStr === todayBerlin();
             return (
@@ -2503,6 +2718,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
                   {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
                   {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
+                  {hasSport && <span className="w-1.5 h-1.5 rounded-full bg-sport"></span>}
                 </span>
               </button>
             );
@@ -2510,9 +2726,46 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
         </div>
       </div>
       <div className="text-[10px] text-inkDim mt-2 space-y-0.5">
-        <div>🟢 Quest erledigt · 🟠 Aufgabe geplant · 🔵 Termin geplant · 🟡 Item geplant</div>
+        <div>🟢 Quest erledigt · 🟠 Aufgabe geplant · 🔵 Termin geplant · 🟡 Item geplant{profile.sportTrackingEnabled ? ' · 🟤 Sport getrackt' : ''}</div>
       </div>
+      {showMonthPicker && (
+        <MonthYearPicker year={year} month={month} onJump={jumpToMonth} onClose={() => setShowMonthPicker(false)} />
+      )}
     </div>
+  );
+}
+
+// Dialog zum direkten Springen zu einem bestimmten Jahr/Monat im Kalender
+// (statt sich mit ‹ › Monat für Monat durchklicken zu müssen).
+function MonthYearPicker({ year, month, onJump, onClose }) {
+  const [pickYear, setPickYear] = useState(year);
+  const [pickMonth, setPickMonth] = useState(month);
+  const monthLabels = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+
+  return (
+    <Modal title="Monat wählen" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="flex items-center justify-center gap-5">
+          <button onClick={() => setPickYear(y => y - 1)} className="text-inkDim text-lg px-3 py-1 active:opacity-70">‹</button>
+          <div className="font-stat text-xl text-gold font-bold w-16 text-center">{pickYear}</div>
+          <button onClick={() => setPickYear(y => y + 1)} className="text-inkDim text-lg px-3 py-1 active:opacity-70">›</button>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {monthLabels.map((label, i) => (
+            <button key={i} onClick={() => setPickMonth(i)}
+              className={`text-xs font-medium py-2.5 rounded-xl border ${
+                pickMonth === i ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => onJump(pickYear, pickMonth)}
+          className="w-full bg-gold text-bg font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform">
+          Springen
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -2741,24 +2994,26 @@ function UiScaleSetting() {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
+  const [showSportAnalysis, setShowSportAnalysis] = useState(false);
   const fileInputRef = useRef(null);
   const sections = [
     { key: 'profil', label: 'Profil' },
     { key: 'bibliothek', label: 'Bibliothek' },
     { key: 'anzeige', label: 'Anzeige' },
+    { key: 'extras', label: 'Extras' },
     { key: 'sync', label: 'Sync' },
     { key: 'daten', label: 'Daten' },
   ];
 
   return (
     <div className="px-4 pt-4 pb-28">
-      <div className="flex gap-1.5 overflow-x-auto mb-5 -mx-4 px-4">
+      <div className="grid grid-cols-3 gap-2 mb-5">
         {sections.map(s => (
           <button key={s.key} onClick={() => setSection(s.key)}
-            className={`text-xs font-medium px-3 py-2 rounded-full border whitespace-nowrap ${
+            className={`text-xs font-medium py-2.5 rounded-xl border ${
               section === s.key ? 'bg-gold text-bg border-gold' : 'bg-surface border-border text-inkDim'
             }`}>
             {s.label}
@@ -2795,6 +3050,29 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
       {section === 'anzeige' && (
         <div className="space-y-4">
           <UiScaleSetting />
+        </div>
+      )}
+
+      {section === 'extras' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-ink">🏋️ Sport-Tracking</div>
+              <div className="text-xs text-inkDim mt-1 leading-relaxed">
+                Fügt im Kalender-Tab einen Knopf hinzu, um täglich Kalorien und Protein einzutragen. Gilt nur für dein Profil — der Partner sieht den Knopf nicht, außer er aktiviert es selbst.
+              </div>
+            </div>
+            <button onClick={onToggleSportTracking}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.sportTrackingEnabled ? 'bg-sport' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.sportTrackingEnabled ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+          {profile.sportTrackingEnabled && (
+            <button onClick={() => setShowSportAnalysis(true)}
+              className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
+              📊 Analyse
+            </button>
+          )}
         </div>
       )}
 
@@ -2847,6 +3125,9 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
           <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
             onChange={e => { if (e.target.files[0]) onImport(e.target.files[0]); e.target.value = ''; }} />
         </div>
+      )}
+      {showSportAnalysis && (
+        <SportAnalysisModal profile={profile} onClose={() => setShowSportAnalysis(false)} />
       )}
     </div>
   );
@@ -3035,6 +3316,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [editingProfile, setEditingProfile] = useState(null);
   const [calendarModal, setCalendarModal] = useState(null); // null | { mode: 'add', date } | { mode: 'edit', item }
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(null); // im Kalender-Tab angeklickter Tag (null = heute)
+  const [sportModalDate, setSportModalDate] = useState(null); // null | 'YYYY-MM-DD' — Sport-Tracking-Dialog offen für diesen Tag
 
   // Sobald man den Kalender-Tab verlässt, die Tagesauswahl zurücksetzen — beim
   // nächsten Aufruf des Kalenders soll wieder nichts ausgewählt sein (Standard: heute).
@@ -3170,6 +3452,34 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       result.xpRevoked > 0 ? `Rückgängig gemacht — -${result.xpRevoked} XP` : 'Rückgängig gemacht.',
       'info'
     );
+  }
+
+  function handleToggleSportTracking() {
+    update(s => {
+      const p = s.profiles.find(p => p.id === activeProfile.id);
+      if (p) p.sportTrackingEnabled = !p.sportTrackingEnabled;
+    });
+  }
+
+  function handleSaveSportLog(data) {
+    const date = sportModalDate;
+    update(s => {
+      const p = s.profiles.find(p => p.id === activeProfile.id);
+      if (!p) return;
+      if (!p.sportLog) p.sportLog = {};
+      p.sportLog[date] = data;
+    });
+    setSportModalDate(null);
+    pushToast('Sport-Tracking gespeichert.', 'info');
+  }
+
+  function handleDeleteSportLog(date) {
+    update(s => {
+      const p = s.profiles.find(p => p.id === activeProfile.id);
+      if (p && p.sportLog) delete p.sportLog[date];
+    });
+    setSportModalDate(null);
+    pushToast('Sport-Tracking gelöscht.', 'info');
   }
 
   function handleUseAbility(profileId, abilityId) {
@@ -3369,10 +3679,15 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // 1. Erledigtes rutscht ganz nach unten.
   // 2. Innerhalb dessen: Einträge MIT Uhrzeit zuerst, aufsteigend sortiert (früheste zuerst).
   // 3. Ganztägige Einträge danach, untereinander in unveränderter Reihenfolge (stabil).
+  // Nur im Tagesblick (Kalender-Tab), drei Stufen von oben nach unten:
+  // 1. Offene Aufgaben  2. Termine  3. Erledigte Aufgaben.
+  // Innerhalb jeder Stufe: Einträge mit Uhrzeit zuerst, aufsteigend sortiert.
   const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id)
     .slice()
     .sort((a, b) => {
-      if (a.done !== b.done) return a.done ? 1 : -1;
+      const tierOf = (e) => (e.item.kind === 'aufgabe' && !e.done) ? 0 : e.item.kind === 'termin' ? 1 : 2;
+      const ta = tierOf(a), tb = tierOf(b);
+      if (ta !== tb) return ta - tb;
       const aHasTime = !!a.item.time, bHasTime = !!b.item.time;
       if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
       if (aHasTime && bHasTime) return a.item.time < b.item.time ? -1 : a.item.time > b.item.time ? 1 : 0;
@@ -3434,6 +3749,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             className="w-full border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
             + Aufgabe / Termin hinzufügen
           </button>
+          {activeProfile.sportTrackingEnabled && (() => {
+            const existingSport = activeProfile.sportLog && activeProfile.sportLog[calendarViewedDate];
+            const parts = [];
+            if (existingSport) {
+              if (existingSport.calories != null) parts.push(`${existingSport.calories} kcal`);
+              if (existingSport.protein != null) parts.push(`${existingSport.protein} g Protein`);
+              if (existingSport.weight != null) parts.push(`${existingSport.weight} kg`);
+            }
+            return (
+              <button onClick={() => setSportModalDate(calendarViewedDate)}
+                className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
+                {parts.length > 0 ? `🏋️ ${parts.join(' · ')}` : '🏋️ Sport-Tracken'}
+              </button>
+            );
+          })()}
           <div className="bg-surface border border-border rounded-2xl p-4">
             <SectionLabel>
               {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
@@ -3466,6 +3796,15 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onDelete={handleDeleteCalendarItem}
         />
       )}
+      {sportModalDate && (
+        <SportTrackModal
+          date={sportModalDate}
+          existing={activeProfile.sportLog && activeProfile.sportLog[sportModalDate]}
+          onSave={handleSaveSportLog}
+          onDelete={handleDeleteSportLog}
+          onClose={() => setSportModalDate(null)}
+        />
+      )}
       {activeTab === 'inventar' && (
         <div className="px-4 pt-4 pb-28">
           <div className="font-display text-lg font-bold text-ink mb-4">🎒 Inventar</div>
@@ -3481,6 +3820,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onEditProfile={(p) => setEditingProfile(p)}
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
+          onToggleSportTracking={handleToggleSportTracking}
         />
       )}
 
