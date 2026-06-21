@@ -419,6 +419,12 @@ function getPairingCode() { return localStorage.getItem(PAIRING_KEY); }
 function setStoredPairingCode(code) { localStorage.setItem(PAIRING_KEY, code); }
 function clearPairingCode() { localStorage.removeItem(PAIRING_KEY); }
 
+// Welches Profil auf DIESEM Gerät gerade angezeigt wird — bewusst NICHT Teil des
+// synchronisierten States, sonst würde ein Profilwechsel auf einem Gerät auch das
+// andere Gerät umschalten.
+const ACTIVE_PROFILE_KEY = 'teamquest_active_profile_v1';
+function getStoredActiveProfileId() { return localStorage.getItem(ACTIVE_PROFILE_KEY); }
+
 function generatePairingCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // ohne I/O/0/1 — Verwechslungsgefahr beim Abtippen
   let code = '';
@@ -478,6 +484,7 @@ function freshProfile(overrides) {
     actionsToday: { date: null, count: 0 },   // verdiente Kampf-Aktionen heute (durch Quests)
     actionsSpent: { date: null, count: 0 },   // davon bereits für Fähigkeiten eingesetzte Aktionen
     actionsGrantedFor: {},                     // { 'YYYY-MM-DD': { questId: true } } — verhindert doppelte Aktionen durch kurz->komplett
+    xpGrantedFor: {},                          // { 'YYYY-MM-DD': { questId: <tatsächlich vergebene XP heute> } } — für exaktes Rückgängigmachen
     cooldowns: {},        // { abilityId: 'YYYY-MM-DD' (zuletzt benutzt) }
     inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
@@ -647,6 +654,17 @@ function grantXp(profile, amount) {
     profile.xp -= xpForLevel(profile.level);
     profile.level += 1;
   }
+}
+
+// Kehrt grantXp() um — zieht XP wieder ab und macht dabei nötigenfalls auch
+// Level-Ups rückgängig (mehrfach in Folge, falls nötig). Geht nie unter Level 1.
+function revokeXp(profile, amount) {
+  profile.xp -= amount;
+  while (profile.xp < 0 && profile.level > 1) {
+    profile.level -= 1;
+    profile.xp += xpForLevel(profile.level);
+  }
+  if (profile.xp < 0) profile.xp = 0; // Sicherheitsnetz auf Level 1
 }
 
 /* ----- Kalender: Aufgaben & Termine ----- */
@@ -1057,6 +1075,13 @@ function completeQuestStage(state, profileId, questId, stage) {
   const levelBefore = profile.level;
   grantXp(profile, gained);
   profile.questXpToday.amount += gained;
+
+  // Tatsächlich vergebene XP pro Quest/Tag mitschreiben (kumulativ, falls erst
+  // "kurz" und später "komplett" abgeschlossen wird) — Grundlage für ein exaktes Rückgängigmachen.
+  if (!profile.xpGrantedFor) profile.xpGrantedFor = {};
+  if (!profile.xpGrantedFor[today]) profile.xpGrantedFor[today] = {};
+  profile.xpGrantedFor[today][questId] = (profile.xpGrantedFor[today][questId] || 0) + gained;
+
   addLog(state, `📜 ${profile.name}: "${quest.title}" (${stage === 'kurz' ? 'kurz begonnen' : 'komplett'}) — +${gained} XP${gained < delta ? ' (Tages-XP-Limit erreicht)' : ''}.`);
 
   // Eine Quest darf pro Tag nur EINE Kampf-Aktion auslösen — auch wenn sie
@@ -1074,6 +1099,51 @@ function completeQuestStage(state, profileId, questId, stage) {
   }
 
   return { xpGained: gained, actionGranted, leveledUp: profile.level > levelBefore };
+}
+
+// Macht eine heute abgeschlossene Quest-Stufe rückgängig ("verklickt"): nimmt
+// genau die XP zurück, die für diese Quest heute tatsächlich vergeben wurden
+// (berücksichtigt also einen evtl. gegriffenen Tages-Deckel korrekt), setzt
+// den Fortschritt zurück und nimmt eine dafür vergebene Kampf-Aktion zurück,
+// sofern diese noch nicht für eine Fähigkeit eingesetzt wurde.
+function uncompleteQuestStage(state, profileId, questId) {
+  const profile = state.profiles.find(p => p.id === profileId);
+  const quest = state.quests.find(q => q.id === questId);
+  if (!profile || !quest) return { ok: false };
+
+  const today = todayBerlin();
+  const progress = profile.questProgress[today] || {};
+  if (!progress[questId]) return { ok: false }; // heute nichts zum Rückgängigmachen vorhanden
+
+  const grantedToday = (profile.xpGrantedFor && profile.xpGrantedFor[today] && profile.xpGrantedFor[today][questId]) || 0;
+
+  if (grantedToday > 0) {
+    revokeXp(profile, grantedToday);
+    if (profile.questXpToday && profile.questXpToday.date === today) {
+      profile.questXpToday.amount = Math.max(0, profile.questXpToday.amount - grantedToday);
+    }
+  }
+  if (profile.xpGrantedFor && profile.xpGrantedFor[today]) delete profile.xpGrantedFor[today][questId];
+
+  delete profile.questProgress[today][questId];
+
+  // Dafür vergebene Kampf-Aktion nur zurücknehmen, wenn sie noch ungenutzt ist —
+  // bereits für eine Fähigkeit eingesetzte Aktionen bleiben unangetastet, und das
+  // "schon vergeben"-Flag bleibt dann bewusst stehen, um Doppelvergabe zu verhindern.
+  let actionRevoked = false;
+  if (profile.actionsGrantedFor && profile.actionsGrantedFor[today] && profile.actionsGrantedFor[today][questId]) {
+    const earned = getActionsEarnedToday(profile);
+    const spent = getActionsSpentToday(profile);
+    if (spent < earned) {
+      profile.actionsToday.count = Math.max(0, profile.actionsToday.count - 1);
+      delete profile.actionsGrantedFor[today][questId];
+      actionRevoked = true;
+    }
+  }
+
+  addLog(state, `↩️ ${profile.name}: "${quest.title}" rückgängig gemacht${grantedToday > 0 ? ` — -${grantedToday} XP` : ''}.`);
+
+  return { ok: true, xpRevoked: grantedToday, actionRevoked };
 }
 
 /* ============================================================
@@ -1644,7 +1714,7 @@ function DeleteQuestsModal({ quests, categories, onDelete, onClose }) {
   );
 }
 
-function QuestCard({ quest, stage, onComplete, locked }) {
+function QuestCard({ quest, stage, onComplete, onUncomplete, locked }) {
   return (
     <div className="bg-surface border border-border rounded-2xl p-3.5 flex items-center gap-3">
       <div className="text-2xl w-9 text-center shrink-0">{quest.icon}</div>
@@ -1671,12 +1741,22 @@ function QuestCard({ quest, stage, onComplete, locked }) {
         >
           ✓ Fertig
         </button>
+        {stage && !locked && (
+          <button
+            onClick={onUncomplete}
+            title="Verklickt? Rückgängig machen"
+            aria-label="Quest rückgängig machen"
+            className="text-xs font-semibold rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95"
+          >
+            ↺
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function QuestCategorySection({ category, quests, todayProgress, onComplete, defaultOpen }) {
+function QuestCategorySection({ category, quests, todayProgress, onComplete, onUncomplete, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const doneCount = quests.filter(q => todayProgress[q.id] === 'komplett').length;
   return (
@@ -1697,6 +1777,7 @@ function QuestCategorySection({ category, quests, todayProgress, onComplete, def
               stage={todayProgress[q.id] || null}
               locked={false}
               onComplete={(stage) => onComplete(q.id, stage)}
+              onUncomplete={() => onUncomplete(q.id)}
             />
           ))}
         </div>
@@ -1705,7 +1786,7 @@ function QuestCategorySection({ category, quests, todayProgress, onComplete, def
   );
 }
 
-function QuestsTab({ state, profile, onQuestComplete, onAddQuest, onDeleteQuests, onCalendarComplete, onOpenAddCalendar, onOpenEditCalendar }) {
+function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onCalendarComplete, onOpenAddCalendar, onOpenEditCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const today = todayBerlin();
@@ -1751,6 +1832,7 @@ function QuestsTab({ state, profile, onQuestComplete, onAddQuest, onDeleteQuests
             quests={state.quests.filter(q => q.category === cat)}
             todayProgress={todayProgress}
             onComplete={onQuestComplete}
+            onUncomplete={onQuestUncomplete}
             defaultOpen={false}
           />
         ))}
@@ -2646,6 +2728,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [editingProfile, setEditingProfile] = useState(null);
   const [calendarModal, setCalendarModal] = useState(null); // null | { mode: 'add', date } | { mode: 'edit', item }
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(null); // im Kalender-Tab angeklickter Tag (null = heute)
+  // Geräte-lokal: welches der (max. zwei) Profile wird auf DIESEM Handy angezeigt.
+  const [activeProfileId, setActiveProfileId] = useState(() => getStoredActiveProfileId());
+
+  useEffect(() => {
+    if (activeProfileId) localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
+    else localStorage.removeItem(ACTIVE_PROFILE_KEY);
+  }, [activeProfileId]);
 
   // Anonyme Anmeldung bei Firebase — nötig, damit die Security Rules (auth != null) greifen.
   useEffect(() => {
@@ -2715,8 +2804,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     return next;
   }
 
-  const activeProfile = state.profiles.find(p => p.id === state.activeProfileId) || null;
-  const partnerProfile = state.profiles.find(p => p.id !== state.activeProfileId) || null;
+  const activeProfile = state.profiles.find(p => p.id === activeProfileId) || null;
+  const partnerProfile = state.profiles.find(p => p.id !== activeProfileId) || null;
 
   if (!activeProfile) {
     if (editingProfile) {
@@ -2729,11 +2818,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           isNew={editingProfile.isNew}
           onCancel={() => setEditingProfile(null)}
           onSave={(data) => {
-            update(s => {
-              const p = freshProfile(Object.assign({}, data));
-              s.profiles.push(p);
-              s.activeProfileId = p.id;
-            });
+            const newProfile = freshProfile(Object.assign({}, data));
+            update(s => { s.profiles.push(newProfile); });
+            setActiveProfileId(newProfile.id);
             setEditingProfile(null);
           }}
         />
@@ -2742,7 +2829,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     return (
       <ProfileSelectScreen
         profiles={state.profiles}
-        onSelect={(id) => update(s => { s.activeProfileId = id; })}
+        onSelect={(id) => setActiveProfileId(id)}
         onCreateNew={() => setEditingProfile({ isNew: true })}
       />
     );
@@ -2758,6 +2845,16 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     if (result.leveledUp) pushToast(`🎉 Level Up! ${activeProfile.name} ist jetzt Level ${newLevel}.`, 'levelup');
     pushToast(
       result.actionGranted ? `Quest erledigt! +${result.xpGained} XP, +1 Kampf-Aktion` : `Quest erledigt! +${result.xpGained} XP`,
+      'info'
+    );
+  }
+
+  function handleQuestUncomplete(questId) {
+    let result;
+    update(s => { result = uncompleteQuestStage(s, activeProfile.id, questId); });
+    if (!result || !result.ok) return;
+    pushToast(
+      result.xpRevoked > 0 ? `Rückgängig gemacht — -${result.xpRevoked} XP` : 'Rückgängig gemacht.',
       'info'
     );
   }
@@ -2962,7 +3059,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           <span className="text-lg">💰</span>
           <span className="font-stat text-xl text-gold font-bold leading-none">{activeProfile.gold}</span>
         </div>
-        <button onClick={() => update(s => { s.activeProfileId = null; })} className="flex items-center gap-2" aria-label="Profil wechseln">
+        <button onClick={() => setActiveProfileId(null)} className="flex items-center gap-2" aria-label="Profil wechseln">
           <div className="text-xs text-gold font-stat font-semibold flex items-center gap-1">
             <span>⭐</span>
             <span>Lvl {activeProfile.level}</span>
@@ -2972,7 +3069,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       </div>
 
       {activeTab === 'quests' && (
-        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests}
+        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests}
           onCalendarComplete={handleCalendarComplete}
           onOpenAddCalendar={() => setCalendarModal({ mode: 'add', date: todayBerlin() })}
           onOpenEditCalendar={(item) => setCalendarModal({ mode: 'edit', item })} />
@@ -3041,7 +3138,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         <MoreTab
           state={state} profile={activeProfile}
           pairingCode={pairingCode} connStatus={connStatus}
-          onSwitchProfile={() => update(s => { s.activeProfileId = null; })}
+          onSwitchProfile={() => setActiveProfileId(null)}
           onEditProfile={(p) => setEditingProfile(p)}
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
