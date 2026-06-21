@@ -710,6 +710,11 @@ function formatShortDate(dateStr) {
   return `${d}.${m}.`;
 }
 
+function formatShortDateWithYear(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
+}
+
 function weekdayLabelFor(dateStr) {
   return WEEKDAY_LABELS[weekdayOfDateStr(dateStr)];
 }
@@ -1417,10 +1422,10 @@ function TodayAgendaCard({ entries, onComplete, onEdit, onAddClick }) {
   );
 }
 
-function DateHeading({ dateStr }) {
+function DateHeading({ dateStr, showYear }) {
   return (
     <div className="flex items-baseline gap-1.5 mb-1.5 pb-1 border-b border-border/60">
-      <span className="text-xs font-display font-bold text-gold">{formatShortDate(dateStr)}</span>
+      <span className="text-xs font-display font-bold text-gold">{showYear ? formatShortDateWithYear(dateStr) : formatShortDate(dateStr)}</span>
       <span className="text-[10px] text-inkDim">{weekdayLabelFor(dateStr)}</span>
     </div>
   );
@@ -1479,7 +1484,7 @@ function CompletionLogList({ entries, onEdit }) {
           {dates.length === 0 && <div className="text-xs text-inkDim pb-2">Noch keine Aufgaben erledigt.</div>}
           {dates.map(d => (
             <div key={d}>
-              <DateHeading dateStr={d} />
+              <DateHeading dateStr={d} showYear />
               <div className="space-y-1.5">
                 {grouped[d].map(entry => (
                   <button key={entry.item.id + '_' + entry.scheduledDate} onClick={() => onEdit(entry.item)}
@@ -2321,7 +2326,7 @@ function SelectedDayQuestsCard({ profile, quests, selectedDate }) {
   return (
     <div className="bg-surface border border-border rounded-2xl p-3.5 slide-up">
       <div className="text-xs font-medium text-ink mb-2">
-        {new Date(selectedDate + 'T00:00:00').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })} · Quests
+        {new Date(selectedDate + 'T00:00:00').toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Quests
       </div>
       <div className="space-y-1.5">
         {selectedEntries.map(([questId, stage]) => {
@@ -3203,7 +3208,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           </button>
           <div className="bg-surface border border-border rounded-2xl p-4">
             <SectionLabel>
-              {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDate(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
+              {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
             </SectionLabel>
             {dayAgendaForCalendarTab.length === 0 ? (
               <div className="text-xs text-inkDim">
