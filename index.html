@@ -1481,6 +1481,8 @@ function SportTrackModal({ date, existing, onSave, onDelete, onClose }) {
   const [protein, setProtein] = useState(existing && existing.protein != null ? String(existing.protein) : '');
   const [weight, setWeight] = useState(existing && existing.weight != null ? String(existing.weight) : '');
   const hasExisting = !!(existing && (existing.calories != null || existing.protein != null || existing.weight != null));
+  const proteinRef = useRef(null);
+  const weightRef = useRef(null);
 
   function handleSave() {
     onSave({
@@ -1495,17 +1497,20 @@ function SportTrackModal({ date, existing, onSave, onDelete, onClose }) {
       <div className="space-y-4">
         <div>
           <SectionLabel>Kalorien</SectionLabel>
-          <input type="number" inputMode="numeric" value={calories} onChange={e => setCalories(e.target.value)}
+          <input type="number" inputMode="numeric" enterKeyHint="next" value={calories} onChange={e => setCalories(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); proteinRef.current?.focus(); } }}
             placeholder="z. B. 2200" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
         </div>
         <div>
           <SectionLabel>Protein (g)</SectionLabel>
-          <input type="number" inputMode="numeric" value={protein} onChange={e => setProtein(e.target.value)}
+          <input ref={proteinRef} type="number" inputMode="numeric" enterKeyHint="next" value={protein} onChange={e => setProtein(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); weightRef.current?.focus(); } }}
             placeholder="z. B. 140" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
         </div>
         <div>
           <SectionLabel>Körpergewicht (kg)</SectionLabel>
-          <input type="number" inputMode="decimal" step="0.1" value={weight} onChange={e => setWeight(e.target.value)}
+          <input ref={weightRef} type="number" inputMode="decimal" step="0.1" enterKeyHint="done" value={weight} onChange={e => setWeight(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
             placeholder="z. B. 78,5" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
         </div>
         <button onClick={handleSave}
