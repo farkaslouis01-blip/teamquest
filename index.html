@@ -754,56 +754,33 @@ function formatShortDateWithYear(dateStr) {
 // Termins/einer Aufgabe. Bei Uhrzeit wird zusätzlich eine Erinnerung
 // (VALARM) eingebettet, damit das Handy-Betriebssystem selbst benachrichtigt
 // — TeamQuest muss dafür nicht geöffnet sein.
-function icsLocalTimestamp(date) {
-  const p = n => String(n).padStart(2, '0');
-  return `${date.getFullYear()}${p(date.getMonth() + 1)}${p(date.getDate())}T${p(date.getHours())}${p(date.getMinutes())}${p(date.getSeconds())}`;
-}
-function escapeIcsText(text) {
-  return String(text || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
-}
-function buildIcsForItem(item, scheduledDate) {
-  const hasTime = !!item.time;
-  let dtstartLine, dtendLine;
-  if (!hasTime) {
+// Öffnet Google Calendar direkt mit einem vorausgefüllten Termin —
+// zuverlässiger auf Android als ein .ics-Datei-Download, weil kein
+// Datei-Manager oder MIME-Typ-Zuordnung benötigt wird.
+function exportItemToCalendar(item, scheduledDate) {
+  const pad = n => String(n).padStart(2, '0');
+  let dates;
+  if (!item.time) {
+    // Ganztägig: YYYYMMDD/YYYYMMDD (End-Tag exklusiv, also +1 Tag)
     const startD = scheduledDate.replace(/-/g, '');
     const endObj = new Date(scheduledDate + 'T00:00:00');
     endObj.setDate(endObj.getDate() + 1);
-    const p = n => String(n).padStart(2, '0');
-    const endD = `${endObj.getFullYear()}${p(endObj.getMonth() + 1)}${p(endObj.getDate())}`;
-    dtstartLine = `DTSTART;VALUE=DATE:${startD}`;
-    dtendLine = `DTEND;VALUE=DATE:${endD}`;
+    const endD = `${endObj.getFullYear()}${pad(endObj.getMonth() + 1)}${pad(endObj.getDate())}`;
+    dates = `${startD}/${endD}`;
   } else {
+    // Mit Uhrzeit: YYYYMMDDTHHmmss/YYYYMMDDTHHmmss
     const startObj = new Date(`${scheduledDate}T${item.time}:00`);
     const endObj = new Date(startObj.getTime() + (item.durationMinutes || 60) * 60000);
-    dtstartLine = `DTSTART:${icsLocalTimestamp(startObj)}`;
-    dtendLine = `DTEND:${icsLocalTimestamp(endObj)}`;
+    const fmt = d => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+    dates = `${fmt(startObj)}/${fmt(endObj)}`;
   }
-  let valarmBlock = '';
-  if (hasTime && item.reminderMinutes && item.reminderMinutes > 0) {
-    valarmBlock = `BEGIN:VALARM\r\nTRIGGER:-PT${item.reminderMinutes}M\r\nACTION:DISPLAY\r\nDESCRIPTION:${escapeIcsText(item.title)}\r\nEND:VALARM\r\n`;
-  }
-  return [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//TeamQuest//DE',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    `UID:${item.id}-${scheduledDate}@teamquest`,
-    `DTSTAMP:${icsLocalTimestamp(new Date())}`,
-    dtstartLine,
-    dtendLine,
-    `SUMMARY:${escapeIcsText(item.title)}`,
-  ].join('\r\n') + '\r\n' + valarmBlock + 'END:VEVENT\r\nEND:VCALENDAR\r\n';
-}
-function exportItemToCalendar(item, scheduledDate) {
-  const ics = buildIcsForItem(item, scheduledDate);
-  const dataUri = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
-  const a = document.createElement('a');
-  a.href = dataUri;
-  a.download = (item.title || 'termin').replace(/[^a-z0-9äöüß]+/gi, '_').slice(0, 40) + '.ics';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: item.title || '',
+    dates,
+    ...(item.reminderMinutes && item.time ? { trp: 'false' } : {}),
+  });
+  window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank');
 }
 
 // Wertet das Sport-Tracking-Protokoll eines Profils aus: Protein pro kg
