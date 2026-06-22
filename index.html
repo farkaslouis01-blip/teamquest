@@ -49,6 +49,7 @@
           shield: '#5b8fc7',
           orange: '#ff8a3d',
           sport: '#8c7d6c',
+          birthday: '#9b72cf',
         },
         fontFamily: {
           display: ['Cinzel', 'serif'],
@@ -167,7 +168,7 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useMemo, useRef, useCallback } = React;
+const { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } = React;
 
 /* ============================================================
    1. SPIELDATEN / KONSTANTEN
@@ -533,6 +534,7 @@ function initialState() {
     pendingConfirmations: [], // [{ id, category, itemId, title, cost, buyerId, partnerId, buyerPaid, partnerPaid }]
     log: [],                  // [{ id, ts, text }]
     calendarItems: [],        // [{ id, kind: 'aufgabe'|'termin', title, icon, date, recurrence, carryForward, occurrences }]
+    birthdays: [],            // [{ id, name, day, month, year? }] — day/month 1-basiert
   };
 }
 
@@ -2095,7 +2097,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
         <div>
           <SectionLabel>XP-Wert</SectionLabel>
           <div className="flex gap-2">
-            {[10, 20].map(v => (
+            {[5, 10, 20].map(v => (
               <button key={v} onClick={() => setXp(v)}
                 className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-stat font-semibold ${
                   xp === v ? 'border-gold bg-gold/10 text-gold' : 'border-border bg-surface text-inkDim'
@@ -2168,6 +2170,354 @@ function DeleteQuestsModal({ quests, categories, onDelete, onClose }) {
         className="w-full bg-hp disabled:opacity-30 text-ink font-semibold rounded-xl py-3 mt-4">
         {selected.size > 0 ? `${selected.size} Aufgabe${selected.size > 1 ? 'n' : ''} löschen` : 'Aufgaben löschen'}
       </button>
+    </Modal>
+  );
+}
+
+// Grip-Handle-Icon (3 horizontale Striche)
+function ConfirmModal({ message, confirmLabel = 'Löschen', onConfirm, onCancel }) {
+  return (
+    <Modal title="Sicher?" onClose={onCancel}>
+      <div className="space-y-4">
+        <p className="text-sm text-inkDim leading-relaxed">{message}</p>
+        <div className="flex gap-2">
+          <button onClick={onCancel}
+            className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim active:scale-95">
+            Abbrechen
+          </button>
+          <button onClick={onConfirm}
+            className="flex-1 bg-hp/90 text-ink font-semibold rounded-xl py-2.5 text-sm active:scale-95">
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 14 10" width="14" height="10" fill="currentColor" className="text-inkDim/50 pointer-events-none">
+      <rect y="0" width="14" height="2" rx="1"/>
+      <rect y="4" width="14" height="2" rx="1"/>
+      <rect y="8" width="14" height="2" rx="1"/>
+    </svg>
+  );
+}
+
+const QUEST_H = 48; // px — Höhe einer Quest-Zeile (h-12)
+
+function QuestEditModal({ quests, categories, onSave, onClose }) {
+  const [cats, setCats] = useState([...categories]);
+  const [qs, setQs] = useState(quests.map(q => ({ ...q })));
+  const [editingId, setEditingId] = useState(null);
+  const [editingCat, setEditingCat] = useState(null);
+  const [editingCatName, setEditingCatName] = useState('');
+  // confirm = { message, onConfirm } — zeigt ConfirmModal
+  const [confirm, setConfirm] = useState(null);
+
+  // Drag-State (useState für Re-Renders, useRef für aktuellen Wert in Event-Handlern)
+  const [drag, setDrag] = useState(null);
+  const dragRef = useRef(null);
+  // FLIP: Element das gerade eingeordnet wird
+  const [dropping, setDropping] = useState(null); // { kind, id, fromY }
+
+  // DOM-Refs für Höhenmessung und FLIP-Animation
+  const catRefs  = useRef({}); // catName → DOM-Element
+  const questRefs = useRef({}); // q.id   → DOM-Element
+
+  const dragOffsetY = drag ? drag.currentY - drag.startY : 0;
+
+  // dropIdx mit echter Höhe für Kategorien, fixer Höhe für Quests
+  function calcCatDropIdx(origIdx, offsetY) {
+    const heights = cats.map(c => catRefs.current[c]?.offsetHeight || 80);
+    if (offsetY > 0) {
+      let t = 0;
+      for (let i = origIdx + 1; i < cats.length; i++) {
+        t += heights[i] * 0.5; if (offsetY < t) return i - 1;
+        t += heights[i] * 0.5;
+      }
+      return cats.length - 1;
+    } else if (offsetY < 0) {
+      let t = 0;
+      for (let i = origIdx - 1; i >= 0; i--) {
+        t += heights[i] * 0.5; if (-offsetY < t) return i + 1;
+        t += heights[i] * 0.5;
+      }
+      return 0;
+    }
+    return origIdx;
+  }
+
+  const dropIdx = drag == null ? null : drag.kind === 'cat'
+    ? calcCatDropIdx(drag.origIdx, dragOffsetY)
+    : Math.max(0, Math.min(drag.listLen - 1, drag.origIdx + Math.round(dragOffsetY / QUEST_H)));
+
+  function shiftFor(myIdx) {
+    if (!drag || dropIdx === null || dropIdx === drag.origIdx) return 0;
+    const o = drag.origIdx, d = dropIdx;
+    const shiftAmt = drag.kind === 'cat'
+      ? (catRefs.current[drag.id]?.offsetHeight || 80)
+      : QUEST_H;
+    if (o < d && myIdx > o && myIdx <= d) return -shiftAmt;
+    if (o > d && myIdx < o && myIdx >= d) return +shiftAmt;
+    return 0;
+  }
+
+  // settling=true → alle Nicht-FLIP-Elemente erhalten kurz transition:none,
+  // damit sie nicht falsch animieren. Nach einem Frame wieder deaktiviert.
+  const [settling, setSettling] = useState(false);
+
+  // FLIP-Animation: nach dem Einordnen das Element von seiner alten visuellen
+  // Position sanft an die neue DOM-Position animieren.
+  // useLayoutEffect → greift synchron nach DOM-Update, VOR dem Browser-Paint.
+  useLayoutEffect(() => {
+    if (!dropping) return;
+    const el = dropping.kind === 'cat'
+      ? catRefs.current[dropping.id]
+      : questRefs.current[dropping.id];
+    if (!el) { setDropping(null); return; }
+
+    const newY = el.getBoundingClientRect().top;
+    const delta = dropping.fromY - newY;
+    if (Math.abs(delta) < 1) { setDropping(null); return; }
+
+    // 1) Element sofort an alte visuelle Position versetzen (kein Übergang)
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta}px)`;
+    void el.offsetHeight; // Reflow erzwingen
+
+    // 2) Smooth zur endgültigen Position animieren
+    el.style.transition = 'transform 240ms cubic-bezier(0.2, 0, 0, 1)';
+    el.style.transform = 'translateY(0)';
+
+    let timer;
+    const cleanup = () => { el.style.cssText = ''; setDropping(null); clearTimeout(timer); };
+    el.addEventListener('transitionend', cleanup, { once: true });
+    timer = setTimeout(cleanup, 400);
+    return () => clearTimeout(timer);
+  }, [dropping]);
+
+  // Globale Mouse/Touch-Events
+  useEffect(() => {
+    if (!drag) return;
+    const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
+
+    function onMove(e) {
+      if (e.cancelable) e.preventDefault();
+      const newY = getY(e);
+      dragRef.current = { ...dragRef.current, currentY: newY };
+      setDrag(d => d ? { ...d, currentY: newY } : null);
+    }
+
+    function onEnd(e) {
+      const d = dragRef.current;
+      if (!d) return;
+      const offsetY = getY(e) - d.startY;
+      const targetIdx = d.kind === 'cat'
+        ? calcCatDropIdx(d.origIdx, offsetY)
+        : Math.max(0, Math.min(d.listLen - 1, d.origIdx + Math.round(offsetY / QUEST_H)));
+
+      // Visuelle Position VOR dem State-Update messen (inkl. laufendem Transform)
+      const el = d.kind === 'cat' ? catRefs.current[d.id] : questRefs.current[d.id];
+      const fromY = el?.getBoundingClientRect().top ?? null;
+
+      dragRef.current = null;
+      setDrag(null);
+
+      if (targetIdx !== d.origIdx) {
+        if (d.kind === 'cat') {
+          setCats(prev => {
+            const next = [...prev];
+            const [item] = next.splice(d.origIdx, 1);
+            next.splice(targetIdx, 0, item);
+            return next;
+          });
+        } else {
+          setQs(prev => {
+            const next = [...prev];
+            const catIdxs = next.map((q, i) => q.category === d.catName ? i : -1).filter(i => i >= 0);
+            const [item] = next.splice(catIdxs[d.origIdx], 1);
+            const catIdxs2 = next.map((q, i) => q.category === d.catName ? i : -1).filter(i => i >= 0);
+            next.splice(catIdxs2[targetIdx] ?? next.length, 0, item);
+            return next;
+          });
+        }
+        if (fromY !== null) {
+          setSettling(true);
+          requestAnimationFrame(() => setSettling(false));
+          setDropping({ kind: d.kind, id: d.id, fromY });
+        }
+      }
+    }
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+    };
+  }, [!!drag]);
+
+  return (
+    <Modal title="✏️ Quests bearbeiten" onClose={onClose} wide>
+      <div className="text-[10px] text-inkDim mb-3">≡ greifen und ziehen zum Sortieren.</div>
+      <div className="space-y-5 max-h-[60vh] overflow-y-auto" style={{ userSelect: drag ? 'none' : 'auto' }}>
+        {cats.map((cat, ci) => {
+          const isSelf = drag?.kind === 'cat' && drag?.id === cat;
+          const isDropping = dropping?.kind === 'cat' && dropping?.id === cat;
+          const shift = isSelf ? 0 : (drag?.kind === 'cat' ? shiftFor(ci) : 0);
+          const translateY = isSelf ? dragOffsetY : shift;
+          const catQuests = qs.filter(q => q.category === cat);
+          return (
+            <div key={cat}
+              ref={el => { catRefs.current[cat] = el; }}
+              style={isDropping ? {} : {
+                transform: `translateY(${translateY}px)`,
+                transition: (isSelf || settling) ? 'none' : 'transform 160ms ease',
+                zIndex: isSelf ? 20 : 1,
+                position: 'relative',
+                boxShadow: isSelf ? '0 8px 32px rgba(0,0,0,0.45)' : 'none',
+              }}
+              className={`bg-bgElevated rounded-2xl border overflow-hidden ${isSelf ? 'scale-[1.02] border-gold/50' : 'border-border'}`}>
+              <div className="flex items-center gap-2.5 px-3 border-b border-border bg-surface" style={{ height: editingCat === cat ? 'auto' : 44, minHeight: 44, paddingTop: editingCat === cat ? 8 : 0, paddingBottom: editingCat === cat ? 8 : 0 }}>
+                {editingCat !== cat && (
+                  <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
+                    onMouseDown={e => { e.preventDefault(); const d = { kind:'cat', id:cat, catName:'', origIdx:ci, listLen:cats.length, startY:e.clientY, currentY:e.clientY }; dragRef.current = d; setDrag(d); }}
+                    onTouchStart={e => { const d = { kind:'cat', id:cat, catName:'', origIdx:ci, listLen:cats.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                    <GripIcon />
+                  </div>
+                )}
+                {editingCat === cat ? (
+                  <div className="flex items-center gap-2 flex-1">
+                    <input type="text" value={editingCatName}
+                      onChange={e => setEditingCatName(e.target.value)}
+                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') { e.target.blur(); } }}
+                      autoFocus
+                      className="flex-1 bg-bg border border-gold/50 rounded-lg px-2.5 py-1.5 text-sm text-ink" />
+                    <button onClick={() => {
+                      const newName = editingCatName.trim();
+                      if (newName && newName !== cat) {
+                        setCats(prev => prev.map(c => c === cat ? newName : c));
+                        setQs(prev => prev.map(q => q.category === cat ? { ...q, category: newName } : q));
+                      }
+                      setEditingCat(null);
+                    }} className="text-xs font-semibold text-gold border border-gold/40 bg-gold/10 rounded-lg px-2.5 py-1.5 active:scale-95 shrink-0">✓</button>
+                    <button onClick={() => setEditingCat(null)}
+                      className="text-xs text-inkDim border border-border rounded-lg px-2 py-1.5 active:scale-95 shrink-0">✕</button>
+                  </div>
+                ) : (
+                  <span className="text-xs font-semibold text-gold flex-1 truncate">{cat}</span>
+                )}
+                {editingCat !== cat && (
+                  <>
+                    <button onClick={() => { setEditingCat(cat); setEditingCatName(cat); }}
+                      className="w-7 h-7 rounded-lg border border-border bg-bgElevated text-inkDim text-xs active:scale-90 flex items-center justify-center shrink-0">✏️</button>
+                    <button onClick={() => {
+                      const count = qs.filter(q => q.category === cat).length;
+                      const msg = count > 0
+                        ? `Kategorie „${cat}" und ${count} ${count === 1 ? 'Quest' : 'Quests'} darin wirklich löschen?`
+                        : `Kategorie „${cat}" wirklich löschen?`;
+                      setConfirm({ message: msg, onConfirm: () => {
+                        setCats(prev => prev.filter(c => c !== cat));
+                        setQs(prev => prev.filter(q => q.category !== cat));
+                      }});
+                    }} className="w-7 h-7 rounded-lg border border-hp/40 bg-hp/5 text-hp text-xs active:scale-90 flex items-center justify-center shrink-0">🗑️</button>
+                  </>
+                )}
+              </div>
+              <div className="divide-y divide-border/50">
+                {catQuests.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-inkDim">Keine Quests in dieser Kategorie.</div>
+                )}
+                {catQuests.map((q, qi) => {
+                  const isEditing = editingId === q.id;
+                  const isSelfQ = drag?.kind === 'quest' && drag?.id === q.id;
+                  const isDroppingQ = dropping?.kind === 'quest' && dropping?.id === q.id;
+                  const shiftQ = isSelfQ ? 0 : (drag?.kind === 'quest' && drag?.catName === cat ? shiftFor(qi) : 0);
+                  const translateYQ = isSelfQ ? dragOffsetY : shiftQ;
+
+                  function liveUpdate(patch) {
+                    setQs(prev => prev.map(item => item.id === q.id ? { ...item, ...patch } : item));
+                  }
+
+                  return (
+                    <div key={q.id}
+                      ref={el => { questRefs.current[q.id] = el; }}
+                      style={isDroppingQ ? {} : {
+                        transform: `translateY(${translateYQ}px)`,
+                        transition: (isSelfQ || settling) ? 'none' : 'transform 160ms ease',
+                        zIndex: isSelfQ ? 20 : 1,
+                        position: 'relative',
+                        boxShadow: isSelfQ ? '0 6px 20px rgba(0,0,0,0.4)' : 'none',
+                      }}
+                      className={`px-3 ${isEditing ? 'py-2.5' : ''} ${isSelfQ ? 'bg-surface scale-[1.01]' : ''}`}>
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <input type="text" value={q.title}
+                              onChange={e => liveUpdate({ title: e.target.value })}
+                              enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') { e.target.blur(); setEditingId(null); } }}
+                              className="flex-1 bg-surface border border-gold/40 rounded-lg px-3 py-2 text-sm text-ink" />
+                            <input type="text" value={q.icon}
+                              onChange={e => liveUpdate({ icon: e.target.value.slice(0, 2) })}
+                              enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                              className="w-14 bg-surface border border-border rounded-lg px-2 py-2 text-xl text-center" />
+                          </div>
+                          <select value={String(q.xp)} onChange={e => liveUpdate({ xp: Number(e.target.value) })}
+                            className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-ink font-stat">
+                            <option value="5">5 XP</option>
+                            <option value="10">10 XP</option>
+                            <option value="20">20 XP</option>
+                          </select>
+                          <select value={q.category} onChange={e => liveUpdate({ category: e.target.value })}
+                            className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-ink">
+                            {cats.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <button onClick={() => setEditingId(null)}
+                            className="w-full text-xs text-inkDim border border-border rounded-lg py-1.5 active:scale-95">
+                            Fertig
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2.5" style={{ height: QUEST_H }}>
+                          <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
+                            onMouseDown={e => { e.preventDefault(); const d = { kind:'quest', id:q.id, catName:cat, origIdx:qi, listLen:catQuests.length, startY:e.clientY, currentY:e.clientY }; dragRef.current = d; setDrag(d); }}
+                            onTouchStart={e => { const d = { kind:'quest', id:q.id, catName:cat, origIdx:qi, listLen:catQuests.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                            <GripIcon />
+                          </div>
+                          <span className="text-base shrink-0">{q.icon}</span>
+                          <span className="text-sm text-ink flex-1 min-w-0 truncate">{q.title}</span>
+                          <span className="text-[10px] font-stat text-gold shrink-0">{q.xp} XP</span>
+                          <button onClick={() => setEditingId(q.id)}
+                            className="w-7 h-7 rounded-lg border border-border bg-bgElevated text-inkDim text-xs active:scale-90 flex items-center justify-center shrink-0">✏️</button>
+                          <button onClick={() => setConfirm({ message: `„${q.title}" wirklich löschen?`, onConfirm: () => setQs(prev => prev.filter(item => item.id !== q.id)) })}
+                            className="w-7 h-7 rounded-lg border border-hp/40 bg-hp/5 text-hp text-xs active:scale-90 flex items-center justify-center shrink-0">🗑️</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={() => onSave(cats, qs)} className="w-full bg-gold text-bg font-semibold rounded-xl py-3 mt-4 active:scale-[0.98]">
+        Speichern
+      </button>
+      {confirm && (
+        <ConfirmModal
+          message={confirm.message}
+          onConfirm={() => { confirm.onConfirm(); setConfirm(null); }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
     </Modal>
   );
 }
@@ -2250,9 +2600,9 @@ function QuestCategorySection({ category, quests, todayProgress, onComplete, onU
   );
 }
 
-function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onCalendarComplete, onCalendarUncomplete, onOpenAddCalendar, onOpenEditCalendar }) {
+function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onEditQuests, onCalendarComplete, onCalendarUncomplete, onOpenAddCalendar, onOpenEditCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const today = todayBerlin();
   const todayProgress = profile.questProgress[today] || {};
   const actionsEarned = getActionsEarnedToday(profile);
@@ -2277,11 +2627,9 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
       />
 
       <div className="flex items-center justify-between">
-        <div>
-          <div className="font-display text-lg font-bold text-ink">Heutige Quests</div>
-          <div className="text-xs text-inkDim mt-0.5">
-            {allDone ? '🌟 Alles erledigt heute!' : someDone ? 'In Arbeit …' : 'Noch nichts erledigt.'}
-          </div>
+        <div className="font-display text-lg font-bold text-ink">
+          Heutige Quests
+          {allDone && <span className="ml-2 text-sm font-sans font-normal text-gold">🌟 Alles erledigt!</span>}
         </div>
         <div className="text-right">
           <div className="font-stat text-sm text-gold">{actionsEarned}/{MAX_ACTIONS_PER_DAY}</div>
@@ -2309,10 +2657,10 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
           className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
           + Eigene Quest hinzufügen
         </button>
-        <button onClick={() => setShowDelete(true)}
+        <button onClick={() => setShowEdit(true)}
           className="w-12 border border-dashed border-border rounded-2xl py-3 text-base text-inkDim active:scale-[0.99]"
-          aria-label="Aufgaben löschen">
-          🗑️
+          aria-label="Quests bearbeiten & sortieren">
+          ✏️
         </button>
       </div>
 
@@ -2350,10 +2698,10 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
         <AddQuestModal categories={state.questCategories} onClose={() => setShowAdd(false)}
           onAdd={(q) => { onAddQuest(q); setShowAdd(false); }} />
       )}
-      {showDelete && (
-        <DeleteQuestsModal quests={state.quests} categories={state.questCategories}
-          onClose={() => setShowDelete(false)}
-          onDelete={(ids) => { onDeleteQuests(ids); setShowDelete(false); }} />
+      {showEdit && (
+        <QuestEditModal quests={state.quests} categories={state.questCategories}
+          onClose={() => setShowEdit(false)}
+          onSave={(cats, qs) => { onEditQuests(cats, qs); setShowEdit(false); }} />
       )}
     </div>
   );
@@ -2632,9 +2980,147 @@ function DeleteShopItemsModal({ shop, onDelete, onClose }) {
   );
 }
 
-function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopItems, onConfirm, onDecline }) {
+// Inline-Bearbeitungs-Modal für Shop-Items: Name, Icon, Gold-Preis.
+// Ähnlich dem Quest-Edit, aber ohne Drag (keine sinnvolle Reihenfolge im Shop).
+function ShopEditModal({ shop, onSave, onClose }) {
+  const [items, setItems] = useState({
+    gemeinsam: shop.gemeinsam.map(i => ({ ...i })),
+    geschenk:  shop.geschenk.map(i => ({ ...i })),
+  });
+  const [confirm, setConfirm] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const dragRef = useRef(null);
+
+  // Touch + Mouse Drag für Sortierung
+  useEffect(() => {
+    if (!drag) return;
+    const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
+    function onMove(e) {
+      if (e.cancelable) e.preventDefault();
+      const newY = getY(e);
+      dragRef.current = { ...dragRef.current, currentY: newY };
+      setDrag(d => d ? { ...d, currentY: newY } : null);
+      const el = document.elementFromPoint(
+        e.touches ? e.touches[0].clientX : e.clientX,
+        e.touches ? e.touches[0].clientY : e.clientY
+      );
+      const row = el?.closest('[data-shopid]');
+      setDragOverId(row ? row.getAttribute('data-shopid') : null);
+    }
+    function onEnd(e) {
+      const d = dragRef.current;
+      if (!d) return;
+      const el = document.elementFromPoint(
+        e.changedTouches ? e.changedTouches[0].clientX : e.clientX,
+        e.changedTouches ? e.changedTouches[0].clientY : e.clientY
+      );
+      const row = el?.closest('[data-shopid]');
+      if (row) {
+        const targetId = row.getAttribute('data-shopid');
+        const cat = d.cat;
+        if (targetId !== d.id) {
+          setItems(prev => {
+            const next = [...prev[cat]];
+            const fi = next.findIndex(i => i.id === d.id);
+            const ti = next.findIndex(i => i.id === targetId);
+            if (fi >= 0 && ti >= 0) { const [item] = next.splice(fi, 1); next.splice(ti, 0, item); }
+            return { ...prev, [cat]: next };
+          });
+        }
+      }
+      dragRef.current = null;
+      setDrag(null);
+      setDragOverId(null);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+    };
+  }, [!!drag]);
+
+  function liveUpdate(cat, id, patch) {
+    setItems(prev => ({ ...prev, [cat]: prev[cat].map(i => i.id === id ? { ...i, ...patch } : i) }));
+  }
+
+  function deleteItem(cat, id, title) {
+    setConfirm({ message: `„${title}" wirklich löschen?`, onConfirm: () =>
+      setItems(prev => ({ ...prev, [cat]: prev[cat].filter(i => i.id !== id) }))
+    });
+  }
+
+  const sections = [
+    { key: 'gemeinsam', label: 'Gemeinsam einlösen' },
+    { key: 'geschenk', label: 'Geschenk vom Partner' },
+  ];
+
+  return (
+    <Modal title="✏️ Shop bearbeiten" onClose={onClose} wide>
+      <div className="space-y-5 max-h-[60vh] overflow-y-auto" style={{ userSelect: drag ? 'none' : 'auto' }}>
+        {sections.map(({ key, label }) => (
+          <div key={key} className="bg-bgElevated rounded-2xl border border-border overflow-hidden">
+            <div className="flex items-center px-3 border-b border-border bg-surface" style={{ height: 44 }}>
+              <span className="text-xs font-semibold text-gold flex-1">{label}</span>
+            </div>
+            <div className="divide-y divide-border/50">
+              {items[key].length === 0 && (
+                <div className="px-3 py-2 text-xs text-inkDim">Keine Items.</div>
+              )}
+              {items[key].map(item => {
+                const isSelf = drag?.id === item.id;
+                const isDragOver = dragOverId === item.id && !isSelf;
+                return (
+                  <div key={item.id} data-shopid={item.id}
+                    className={`flex items-center gap-2 px-3 transition-colors ${isDragOver ? 'bg-gold/10' : ''} ${isSelf ? 'opacity-50' : ''}`}
+                    style={{ height: 52 }}>
+                    <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
+                      onMouseDown={e => { e.preventDefault(); const d = { id: item.id, cat: key, currentY: e.clientY }; dragRef.current = d; setDrag(d); }}
+                      onTouchStart={e => { const d = { id: item.id, cat: key, currentY: e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                      <GripIcon />
+                    </div>
+                    <input type="text" value={item.icon}
+                      onChange={e => liveUpdate(key, item.id, { icon: e.target.value.slice(0, 2) })}
+                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                      className="w-12 bg-surface border border-border rounded-lg px-1.5 py-1.5 text-xl text-center shrink-0" />
+                    <input type="text" value={item.title}
+                      onChange={e => liveUpdate(key, item.id, { title: e.target.value })}
+                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                      className="flex-1 bg-surface border border-border rounded-lg px-2.5 py-1.5 text-sm text-ink min-w-0" />
+                    <input type="text" inputMode="numeric" value={String(item.cost)}
+                      onChange={e => liveUpdate(key, item.id, { cost: Number(e.target.value.replace(/\D/g,'')) || 1 })}
+                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+                      className="w-14 bg-surface border border-border rounded-lg px-2 py-1.5 text-sm font-stat text-gold text-center shrink-0" />
+                    <span className="text-sm font-bold text-gold shrink-0">G</span>
+                    <button onClick={() => deleteItem(key, item.id, item.title)}
+                      className="w-7 h-7 rounded-lg border border-hp/40 bg-hp/5 text-hp text-xs active:scale-90 flex items-center justify-center shrink-0">🗑️</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button onClick={() => onSave(items)} className="w-full bg-gold text-bg font-semibold rounded-xl py-3 mt-4 active:scale-[0.98]">
+        Speichern
+      </button>
+      {confirm && (
+        <ConfirmModal message={confirm.message}
+          onConfirm={() => { confirm.onConfirm(); setConfirm(null); }}
+          onCancel={() => setConfirm(null)} />
+      )}
+    </Modal>
+  );
+}
+
+function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onEditShopItems, onConfirm, onDecline }) {
   const [addCategory, setAddCategory] = useState(null);
-  const [showDelete, setShowDelete] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const myConfirmations = state.pendingConfirmations.filter(c => c.partnerId === profile.id);
 
   return (
@@ -2653,18 +3139,9 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
         </div>
       ))}
 
-      <div className="flex items-center justify-between">
-        <SectionLabel>Dein Gold</SectionLabel>
-        <div className="flex items-center gap-3">
-          <span className="font-stat text-gold font-semibold">{profile.gold} G</span>
-          <button onClick={() => setShowDelete(true)} className="text-inkDim text-sm" aria-label="Items löschen">🗑️</button>
-        </div>
-      </div>
-
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="font-display text-sm font-bold text-ink">Gemeinsam einlösen</div>
-          <button onClick={() => setAddCategory('gemeinsam')} className="text-xs text-inkDim">+ Item</button>
         </div>
         <div className="space-y-2.5">
           {state.shop.gemeinsam.map(item => (
@@ -2676,7 +3153,6 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="font-display text-sm font-bold text-ink">Geschenk vom Partner</div>
-          <button onClick={() => setAddCategory('geschenk')} className="text-xs text-inkDim">+ Item</button>
         </div>
         <div className="space-y-2.5">
           {state.shop.geschenk.map(item => (
@@ -2685,23 +3161,39 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onDeleteShopIt
         </div>
       </div>
 
+      <div className="flex gap-2">
+        <button onClick={() => setAddCategory('gemeinsam')}
+          className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
+          + Gemeinsames Item
+        </button>
+        <button onClick={() => setAddCategory('geschenk')}
+          className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
+          + Geschenk-Item
+        </button>
+        <button onClick={() => setShowEdit(true)}
+          className="w-12 border border-dashed border-border rounded-2xl py-3 text-base text-inkDim active:scale-[0.99]"
+          aria-label="Shop bearbeiten">✏️</button>
+      </div>
+
       {addCategory && (
         <AddShopItemModal category={addCategory} onClose={() => setAddCategory(null)}
           onAdd={(item) => { onAddShopItem(addCategory, item); setAddCategory(null); }} />
       )}
-      {showDelete && (
-        <DeleteShopItemsModal shop={state.shop} onClose={() => setShowDelete(false)}
-          onDelete={(keys) => { onDeleteShopItems(keys); setShowDelete(false); }} />
+      {showEdit && (
+        <ShopEditModal shop={state.shop} onClose={() => setShowEdit(false)}
+          onSave={(items) => { onEditShopItems(items); setShowEdit(false); }} />
       )}
     </div>
   );
 }
 
+
+
 /* ============================================================
    11. TAB: MEHR (Profil, Kalender, Bibliothek, Inventar, Export)
    ============================================================ */
 
-function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate }) {
+function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate, birthdays }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [slideDir, setSlideDir] = useState('right'); // Richtung der letzten Monats-Animation
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -2791,6 +3283,8 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
             const hasSport = profile.sportTrackingEnabled && !!(profile.sportLog && profile.sportLog[dateStr] &&
               (profile.sportLog[dateStr].calories != null || profile.sportLog[dateStr].protein != null || profile.sportLog[dateStr].weight != null));
+            const [bYear, bMonth, bDay] = dateStr.split('-').map(Number);
+            const hasBirthday = (birthdays || []).some(b => b.day === bDay && b.month === bMonth && (!b.private || b.creatorId === profile.id));
             const isSelected = selectedDate === dateStr;
             const isToday = dateStr === todayBerlin();
             return (
@@ -2808,20 +3302,12 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                   {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
                   {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
                   {hasSport && <span className="w-1.5 h-1.5 rounded-full bg-sport"></span>}
+                  {hasBirthday && <span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>}
                 </span>
               </button>
             );
           })}
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-inkDim mt-2">
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-heal"></span>Quest erledigt</span>
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange"></span>Aufgabe geplant</span>
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-shield"></span>Termin geplant</span>
-        <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-gold"></span>Item geplant</span>
-        {profile.sportTrackingEnabled && (
-          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-sport"></span>Sport getrackt</span>
-        )}
       </div>
       {showMonthPicker && (
         <MonthYearPicker year={year} month={month} onJump={jumpToMonth} onClose={() => setShowMonthPicker(false)} />
@@ -3111,7 +3597,123 @@ function UiScaleSetting() {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking }) {
+const MONTH_NAMES = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+function BirthdayModal({ existing, onSave, onClose }) {
+  const [name, setName] = useState(existing ? existing.name : '');
+  const [day, setDay] = useState(existing ? String(existing.day) : '');
+  const [month, setMonth] = useState(existing ? String(existing.month) : '');
+  const [year, setYear] = useState(existing && existing.year ? String(existing.year) : '');
+  const [isPrivate, setIsPrivate] = useState(existing ? !!existing.private : false);
+  const canSave = name.trim() && day && month && Number(day) >= 1 && Number(day) <= 31 && Number(month) >= 1 && Number(month) <= 12;
+
+  return (
+    <Modal title={existing ? 'Geburtstag bearbeiten' : '🎂 Geburtstag hinzufügen'} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <SectionLabel>Name</SectionLabel>
+          <input type="text" value={name} onChange={e => setName(e.target.value)} maxLength={40}
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+            placeholder="z. B. Mama" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink placeholder-inkDim/50" />
+        </div>
+        <div className="flex gap-3">
+          <div className="flex-1">
+            <SectionLabel>Tag</SectionLabel>
+            <input type="text" inputMode="numeric" enterKeyHint="done" value={day}
+              onChange={e => setDay(e.target.value.replace(/\D/g,'').slice(0,2))}
+              onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+              placeholder="1–31" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
+          </div>
+          <div className="flex-1">
+            <SectionLabel>Monat</SectionLabel>
+            <select value={month} onChange={e => setMonth(e.target.value)}
+              className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink">
+              <option value="">– Monat –</option>
+              {MONTH_NAMES.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <SectionLabel>Jahr (optional)</SectionLabel>
+          <input type="text" inputMode="numeric" enterKeyHint="done" value={year}
+            onChange={e => setYear(e.target.value.replace(/\D/g,'').slice(0,4))}
+            onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+            placeholder="z. B. 1990 (optional)" className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat placeholder-inkDim/50" />
+        </div>
+        <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+          <div className="pr-3">
+            <div className="text-sm text-ink">Nur für mich sichtbar</div>
+            <div className="text-[10px] text-inkDim mt-0.5">Partner sieht diesen Geburtstag nicht im Kalender.</div>
+          </div>
+          <button onClick={() => setIsPrivate(v => !v)}
+            className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${isPrivate ? 'bg-birthday' : 'bg-border'}`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${isPrivate ? 'left-5' : 'left-0.5'}`}></span>
+          </button>
+        </div>
+        <button disabled={!canSave} onClick={() => onSave({ name: name.trim(), day: Number(day), month: Number(month), year: year ? Number(year) : null, private: isPrivate })}
+          className={`w-full font-semibold rounded-xl py-3 active:scale-[0.98] transition-transform ${canSave ? 'bg-birthday text-ink' : 'bg-border text-inkDim'}`}>
+          Speichern
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function BirthdaysSection({ birthdays, onAdd, onDelete }) {
+  const [modal, setModal] = useState(null); // null | { mode:'add' } | { mode:'edit', birthday }
+  const today = new Date();
+  const sorted = [...(birthdays || [])].sort((a, b) => {
+    // Nach Monat/Tag sortieren, ab heute
+    const aNext = a.month * 100 + a.day, bNext = b.month * 100 + b.day;
+    return aNext - bNext;
+  });
+
+  function getAge(b) {
+    if (!b.year) return null;
+    const age = today.getFullYear() - b.year;
+    const hasBirthdayPassed = today.getMonth() + 1 > b.month || (today.getMonth() + 1 === b.month && today.getDate() >= b.day);
+    return hasBirthdayPassed ? age : age - 1;
+  }
+
+  return (
+    <div className="space-y-3">
+      {sorted.length === 0 && <div className="text-xs text-inkDim">Noch keine Geburtstage eingetragen.</div>}
+      {sorted.map(b => {
+        const age = getAge(b);
+        const nextAge = age != null ? age + 1 : null;
+        return (
+          <div key={b.id} className="flex items-center gap-3 bg-surface border border-birthday/30 rounded-2xl px-4 py-3"
+            onClick={() => setModal({ mode: 'edit', birthday: b })}>
+            <div className="text-2xl">🎂</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-ink">{b.name}</div>
+              <div className="text-[11px] text-inkDim mt-0.5">
+                {String(b.day).padStart(2,'0')}.{String(b.month).padStart(2,'0')}{b.year ? `.${b.year}` : ''} {nextAge != null ? `· wird ${nextAge}` : ''} {b.private ? '· 🔒 nur du' : ''}
+              </div>
+            </div>
+            <button onClick={e => { e.stopPropagation(); onDelete(b.id); }}
+              className="text-xs font-semibold rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
+              ✕
+            </button>
+          </div>
+        );
+      })}
+      <button onClick={() => setModal({ mode: 'add' })}
+        className="w-full border border-dashed border-birthday/40 rounded-2xl py-3 text-sm text-birthday active:scale-[0.99]">
+        + Geburtstag hinzufügen
+      </button>
+      {modal && (
+        <BirthdayModal
+          existing={modal.mode === 'edit' ? modal.birthday : null}
+          onSave={data => { onAdd(modal.mode === 'edit' ? { ...data, id: modal.birthday.id } : data); setModal(null); }}
+          onClose={() => setModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onAddBirthday, onDeleteBirthday }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -3119,6 +3721,7 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
   const sections = [
     { key: 'profil', label: 'Profil' },
     { key: 'bibliothek', label: 'Bibliothek' },
+    { key: 'geburtstage', label: 'Geburtstage' },
     { key: 'anzeige', label: 'Anzeige' },
     { key: 'extras', label: 'Extras' },
     { key: 'sync', label: 'Sync' },
@@ -3163,6 +3766,10 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
       )}
 
       {section === 'bibliothek' && <MethodsLibrary profile={profile} />}
+
+      {section === 'geburtstage' && (
+        <BirthdaysSection birthdays={state.birthdays} onAdd={onAddBirthday} onDelete={onDeleteBirthday} />
+      )}
 
       {section === 'anzeige' && (
         <div className="space-y-4">
@@ -3578,6 +4185,22 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
+  function handleAddBirthday(data) {
+    update(s => {
+      if (!s.birthdays) s.birthdays = [];
+      const existing = s.birthdays.find(b => b.id === data.id);
+      if (existing) {
+        Object.assign(existing, data);
+      } else {
+        s.birthdays.push({ id: uid('bday'), creatorId: activeProfile.id, ...data });
+      }
+    });
+  }
+
+  function handleDeleteBirthday(id) {
+    update(s => { s.birthdays = (s.birthdays || []).filter(b => b.id !== id); });
+  }
+
   function handleSaveSportLog(data) {
     const date = sportModalDate;
     update(s => {
@@ -3621,9 +4244,18 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     pushToast(ids.length > 1 ? `${ids.length} Aufgaben gelöscht.` : 'Aufgabe gelöscht.', 'info');
   }
 
+  function handleEditQuests(newCategories, newQuests) {
+    update(s => {
+      s.questCategories = newCategories;
+      s.quests = newQuests;
+    });
+    pushToast('Gespeichert.', 'info');
+  }
+
   function handleAddCalendarItem(data) {
     update(s => {
       if (!s.calendarItems) s.calendarItems = [];
+      if (!s.birthdays) s.birthdays = [];
       s.calendarItems.push({
         id: uid('cal'), kind: data.kind, title: data.title, icon: data.icon, date: data.date,
         recurrence: data.recurrence, carryForward: data.carryForward, occurrences: {},
@@ -3688,6 +4320,14 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       });
     });
     pushToast(keys.length > 1 ? `${keys.length} Items gelöscht.` : 'Item gelöscht.', 'info');
+  }
+
+  function handleEditShopItems(items) {
+    update(s => {
+      s.shop.gemeinsam = items.gemeinsam;
+      s.shop.geschenk = items.geschenk;
+    });
+    pushToast('Shop gespeichert.', 'info');
   }
 
   function handleBuy(item, category, buyerPaid) {
@@ -3813,6 +4453,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     ...(state.sharedInventory || []).filter(i => i.plannedDate === calendarViewedDate && !i.done),
   ];
 
+  const [cvYear, cvMonth, cvDay] = calendarViewedDate.split('-').map(Number);
+  const birthdaysForDay = (state.birthdays || []).filter(b =>
+    b.day === cvDay && b.month === cvMonth && (!b.private || b.creatorId === activeProfile.id));
+
   return (
     <div className="max-w-md mx-auto min-h-screen relative">
       <ToastStack toasts={toasts} />
@@ -3827,16 +4471,15 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           <span className="font-stat text-xl text-gold font-bold leading-none">{activeProfile.gold}</span>
         </div>
         <button onClick={() => setActiveProfileId(null)} className="flex items-center gap-2" aria-label="Profil wechseln">
-          <div className="text-xs text-gold font-stat font-semibold flex items-center gap-1">
-            <span>⭐</span>
-            <span>Lvl {activeProfile.level}</span>
+          <div className="text-xs text-inkDim font-stat flex items-center gap-1">
+            <span className="text-gold font-semibold">Lvl {activeProfile.level}</span>
           </div>
           <ProfileAvatar profile={activeProfile} size={32} />
         </button>
       </div>
 
       {activeTab === 'quests' && (
-        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests}
+        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests} onEditQuests={handleEditQuests}
           onCalendarComplete={handleCalendarComplete}
           onCalendarUncomplete={handleCalendarUncomplete}
           onOpenAddCalendar={() => setCalendarModal({ mode: 'add', date: todayBerlin() })}
@@ -3847,7 +4490,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       )}
       {activeTab === 'shop' && partnerProfile && (
         <ShopTab state={state} profile={activeProfile} partner={partnerProfile}
-          onBuy={handleBuy} onAddShopItem={handleAddShopItem} onDeleteShopItems={handleDeleteShopItems}
+          onBuy={handleBuy} onAddShopItem={handleAddShopItem} onEditShopItems={handleEditShopItems}
           onConfirm={handleConfirm} onDecline={handleDecline} />
       )}
       {activeTab === 'shop' && !partnerProfile && (
@@ -3855,9 +4498,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       )}
       {activeTab === 'kalender' && (
         <div className="px-4 pt-4 pb-28 space-y-4">
-          <div className="font-display text-lg font-bold text-ink">📅 Kalender</div>
           <CalendarGrid profile={activeProfile} quests={state.quests} calendarItems={state.calendarItems}
-            plannedItemDates={plannedItemDates}
+            plannedItemDates={plannedItemDates} birthdays={state.birthdays || []}
             selectedDate={calendarSelectedDate} onSelectDate={setCalendarSelectedDate} />
           <button onClick={() => setCalendarModal({ mode: 'add', date: calendarViewedDate })}
             className="w-full border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
@@ -3880,9 +4522,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           })()}
           <div className="bg-surface border border-border rounded-2xl p-4">
             <SectionLabel>
-              {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
+              {calendarViewedDate === todayBerlin() ? `Tagesblick · Heute · ${formatShortDateWithYear(calendarViewedDate)}` : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
             </SectionLabel>
-            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 ? (
+            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 && birthdaysForDay.length === 0 ? (
               <div className="text-xs text-inkDim">
                 {calendarViewedDate === todayBerlin() ? 'Keine Aufgaben oder Termine heute.' : 'Keine Aufgaben oder Termine an diesem Tag.'}
               </div>
@@ -3905,10 +4547,37 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                     )}
                   </div>
                 ))}
+                {birthdaysForDay.map(b => {
+                  const age = b.year ? cvYear - b.year : null;
+                  return (
+                    <div key={b.id} className="flex items-center gap-2.5 rounded-xl border border-birthday/50 bg-birthday/5 px-3 py-2.5">
+                      <span className="text-lg shrink-0">🎂</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-ink truncate">{b.name}</div>
+                        <div className="text-[10px] text-birthday">
+                          Geburtstag{age != null ? ` · wird ${age}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
             <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
             <CompletionLogList entries={getCompletionLog(state, 100, activeProfile.id)} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+          </div>
+          {/* Legende ganz unten, außerhalb aller Blöcke */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-inkDim px-1 pt-1">
+            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-heal"></span>Quest erledigt</span>
+            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange"></span>Aufgabe geplant</span>
+            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-shield"></span>Termin geplant</span>
+            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-gold"></span>Item geplant</span>
+            {activeProfile.sportTrackingEnabled && (
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-sport"></span>Sport getrackt</span>
+            )}
+            {(state.birthdays && state.birthdays.length > 0) && (
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>Geburtstag</span>
+            )}
           </div>
           <SelectedDayQuestsCard profile={activeProfile} quests={state.quests} selectedDate={calendarSelectedDate} />
         </div>
@@ -3933,7 +4602,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       )}
       {activeTab === 'inventar' && (
         <div className="px-4 pt-4 pb-28">
-          <div className="font-display text-lg font-bold text-ink mb-4">🎒 Inventar</div>
           <InventoryList profile={activeProfile} sharedInventory={state.sharedInventory} onMarkDone={handleMarkInventoryDone} onSetDate={handleSetItemDate} />
           <InventoryLogList profile={activeProfile} partner={partnerProfile} sharedInventory={state.sharedInventory} onUnmarkDone={handleMarkInventoryDone} />
         </div>
@@ -3947,6 +4615,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
           onToggleSportTracking={handleToggleSportTracking}
+          onAddBirthday={handleAddBirthday}
+          onDeleteBirthday={handleDeleteBirthday}
         />
       )}
 
