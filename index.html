@@ -1856,19 +1856,43 @@ function DateHeading({ dateStr, showYear }) {
   );
 }
 
-function UpcomingAgendaList({ entries, profiles, onEdit }) {
+function UpcomingAgendaList({ entries, profiles, onEdit, birthdays, activeProfileId }) {
   const [open, setOpen] = useState(false);
+
+  // Geburtstage der nächsten 30 Tage berechnen
+  const today = todayBerlin();
+  const [ty, tm, td] = today.split('-').map(Number);
+  const birthdayEntries = [];
+  const visibleBirthdays = (birthdays || []).filter(b => !b.private || b.creatorId === activeProfileId);
+  for (let i = 0; i < 30; i++) {
+    const dateObj = new Date(today + 'T00:00:00');
+    dateObj.setDate(dateObj.getDate() + i);
+    const d = dateObj.getDate(), m = dateObj.getMonth() + 1;
+    const dateStr = `${dateObj.getFullYear()}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    visibleBirthdays.forEach(b => {
+      if (b.day === d && b.month === m) {
+        const age = b.year ? dateObj.getFullYear() - b.year : null;
+        birthdayEntries.push({ dateStr, b, age });
+      }
+    });
+  }
+
+  // Zusammenführen und nach Datum sortieren
   const grouped = {};
   entries.forEach(e => {
-    (grouped[e.scheduledDate] = grouped[e.scheduledDate] || []).push(e);
+    (grouped[e.scheduledDate] = grouped[e.scheduledDate] || { agenda: [], bdays: [] }).agenda.push(e);
+  });
+  birthdayEntries.forEach(({ dateStr, b, age }) => {
+    (grouped[dateStr] = grouped[dateStr] || { agenda: [], bdays: [] }).bdays.push({ b, age });
   });
   const dates = Object.keys(grouped).sort();
+  const totalCount = entries.length + birthdayEntries.length;
 
   return (
     <div className="mt-3">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-xs text-inkDim py-2">
         <span>{open ? '▼' : '▶'} Nächste 30 Tage</span>
-        <span className="font-stat">{entries.length} Einträge</span>
+        <span className="font-stat">{totalCount} Einträge</span>
       </button>
       {open && (
         <div className="space-y-3 mt-1">
@@ -1877,9 +1901,19 @@ function UpcomingAgendaList({ entries, profiles, onEdit }) {
             <div key={d}>
               <DateHeading dateStr={d} />
               <div className="space-y-1.5">
-                {grouped[d].map(entry => (
+                {(grouped[d].agenda || []).map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={profiles}
                     onComplete={() => {}} onEdit={onEdit} actionable={false} showDate={false} />
+                ))}
+                {(grouped[d].bdays || []).map(({ b, age }) => (
+                  <div key={b.id} className="flex items-center gap-2.5 rounded-xl border border-birthday/50 bg-birthday/5 px-3 py-2.5">
+                    <span className="text-lg shrink-0">🎂</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-ink truncate">{b.name}</div>
+                      <div className="text-[10px] text-birthday">Geburtstag{age != null ? ` · wird ${age}` : ''}</div>
+                    </div>
+                    {b.private && <span className="text-[10px] text-inkDim shrink-0">🔒</span>}
+                  </div>
                 ))}
               </div>
             </div>
@@ -4564,9 +4598,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                 })}
               </div>
             )}
-            <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
+            <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles}
+              birthdays={state.birthdays} activeProfileId={activeProfile.id}
+              onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
             <CompletionLogList entries={getCompletionLog(state, 100, activeProfile.id)} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
           </div>
+          <SelectedDayQuestsCard profile={activeProfile} quests={state.quests} selectedDate={calendarSelectedDate} />
           {/* Legende ganz unten, außerhalb aller Blöcke */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-inkDim px-1 pt-1">
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-heal"></span>Quest erledigt</span>
@@ -4580,7 +4617,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>Geburtstag</span>
             )}
           </div>
-          <SelectedDayQuestsCard profile={activeProfile} quests={state.quests} selectedDate={calendarSelectedDate} />
         </div>
       )}
       {calendarModal && (
