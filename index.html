@@ -2302,7 +2302,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
   // Globale Mouse/Touch-Events — einmalig beim Mount registriert.
   // dragRef.current dient als Guard, damit nur reagiert wird wenn ein Drag läuft.
   useEffect(() => {
-    const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
+    const getY = e => (e.changedTouches?.length ? e.changedTouches[0].clientY : e.touches?.length ? e.touches[0].clientY : e.clientY);
 
     function onMove(e) {
       if (!dragRef.current) return;
@@ -2390,7 +2390,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
                 {editingCat !== cat && (
                   <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
                     onMouseDown={e => { e.preventDefault(); const d = { kind:'cat', id:cat, catName:'', origIdx:ci, listLen:cats.length, startY:e.clientY, currentY:e.clientY }; dragRef.current = d; setDrag(d); }}
-                    onTouchStart={e => { const d = { kind:'cat', id:cat, catName:'', origIdx:ci, listLen:cats.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                    onTouchStart={e => { e.preventDefault(); const d = { kind:'cat', id:cat, catName:'', origIdx:ci, listLen:cats.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
                     <GripIcon />
                   </div>
                 )}
@@ -2489,7 +2489,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
                         <div className="flex items-center gap-2.5" style={{ height: QUEST_H }}>
                           <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
                             onMouseDown={e => { e.preventDefault(); const d = { kind:'quest', id:q.id, catName:cat, origIdx:qi, listLen:catQuests.length, startY:e.clientY, currentY:e.clientY }; dragRef.current = d; setDrag(d); }}
-                            onTouchStart={e => { const d = { kind:'quest', id:q.id, catName:cat, origIdx:qi, listLen:catQuests.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                            onTouchStart={e => { e.preventDefault(); const d = { kind:'quest', id:q.id, catName:cat, origIdx:qi, listLen:catQuests.length, startY:e.touches[0].clientY, currentY:e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
                             <GripIcon />
                           </div>
                           <span className="text-base shrink-0">{q.icon}</span>
@@ -2995,7 +2995,7 @@ function ShopEditModal({ shop, onSave, onClose }) {
 
   // Touch + Mouse Drag für Sortierung — einmalig beim Mount registriert.
   useEffect(() => {
-    const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
+    const getY = e => (e.changedTouches?.length ? e.changedTouches[0].clientY : e.touches?.length ? e.touches[0].clientY : e.clientY);
     function onMove(e) {
       if (!dragRef.current) return;
       if (e.cancelable) e.preventDefault();
@@ -3082,7 +3082,7 @@ function ShopEditModal({ shop, onSave, onClose }) {
                     style={{ height: 52 }}>
                     <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
                       onMouseDown={e => { e.preventDefault(); const d = { id: item.id, cat: key, currentY: e.clientY }; dragRef.current = d; setDrag(d); }}
-                      onTouchStart={e => { const d = { id: item.id, cat: key, currentY: e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
+                      onTouchStart={e => { e.preventDefault(); const d = { id: item.id, cat: key, currentY: e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
                       <GripIcon />
                     </div>
                     <input type="text" value={item.icon}
