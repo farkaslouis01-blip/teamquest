@@ -2299,12 +2299,13 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
     return () => clearTimeout(timer);
   }, [dropping]);
 
-  // Globale Mouse/Touch-Events
+  // Globale Mouse/Touch-Events — einmalig beim Mount registriert.
+  // dragRef.current dient als Guard, damit nur reagiert wird wenn ein Drag läuft.
   useEffect(() => {
-    if (!drag) return;
     const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
 
     function onMove(e) {
+      if (!dragRef.current) return;
       if (e.cancelable) e.preventDefault();
       const newY = getY(e);
       dragRef.current = { ...dragRef.current, currentY: newY };
@@ -2362,7 +2363,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onEnd);
     };
-  }, [!!drag]);
+  }, []); // einmalig beim Mount
 
   return (
     <Modal title="✏️ Quests bearbeiten" onClose={onClose} wide>
@@ -2992,11 +2993,11 @@ function ShopEditModal({ shop, onSave, onClose }) {
   const [dragOverId, setDragOverId] = useState(null);
   const dragRef = useRef(null);
 
-  // Touch + Mouse Drag für Sortierung
+  // Touch + Mouse Drag für Sortierung — einmalig beim Mount registriert.
   useEffect(() => {
-    if (!drag) return;
     const getY = e => e.touches ? e.touches[0].clientY : e.clientY;
     function onMove(e) {
+      if (!dragRef.current) return;
       if (e.cancelable) e.preventDefault();
       const newY = getY(e);
       dragRef.current = { ...dragRef.current, currentY: newY };
@@ -3043,7 +3044,7 @@ function ShopEditModal({ shop, onSave, onClose }) {
       document.removeEventListener('touchmove', onMove);
       document.removeEventListener('touchend', onEnd);
     };
-  }, [!!drag]);
+  }, []); // einmalig beim Mount
 
   function liveUpdate(cat, id, patch) {
     setItems(prev => ({ ...prev, [cat]: prev[cat].map(i => i.id === id ? { ...i, ...patch } : i) }));
