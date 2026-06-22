@@ -702,6 +702,37 @@ function daysBetweenDateStrs(a, b) {
   return Math.round((db - da) / 86400000);
 }
 
+// Sortierlogik für Tagesblick und Heute-Karte:
+// 1. Überfällige Aufgaben (overdue > 0) — älteste zuerst (kleinste scheduledDate oben)
+// 2. Offene Aufgaben (nicht überfällig) — mit Uhrzeit zuerst (aufsteigend), dann ganztägig
+// 3. Termine — mit Uhrzeit zuerst (aufsteigend), dann ganztägig
+// 4. Erledigte Aufgaben ganz unten
+function sortAgendaEntries(entries) {
+  return entries.slice().sort((a, b) => {
+    const tierOf = (e) => {
+      if (e.done) return 3;
+      if (e.item.kind === 'aufgabe' && e.overdue > 0) return 0;
+      if (e.item.kind === 'aufgabe') return 1;
+      return 2; // Termin
+    };
+    const ta = tierOf(a), tb = tierOf(b);
+    if (ta !== tb) return ta - tb;
+    // Innerhalb Tier 0 (überfällig): älteste scheduledDate zuerst, bei gleichem Datum Uhrzeit aufsteigend
+    if (ta === 0) {
+      if (a.scheduledDate !== b.scheduledDate) return a.scheduledDate < b.scheduledDate ? -1 : 1;
+      const aHasTime = !!a.item.time, bHasTime = !!b.item.time;
+      if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
+      if (aHasTime && bHasTime) return a.item.time < b.item.time ? -1 : a.item.time > b.item.time ? 1 : 0;
+      return 0;
+    }
+    // Innerhalb anderer Tiers: Uhrzeit aufsteigend, danach ganztägig
+    const aHasTime = !!a.item.time, bHasTime = !!b.item.time;
+    if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
+    if (aHasTime && bHasTime) return a.item.time < b.item.time ? -1 : a.item.time > b.item.time ? 1 : 0;
+    return 0;
+  });
+}
+
 // Mo=0 .. So=6, passend zur bestehenden Konvention im Kalender-Grid.
 function weekdayOfDateStr(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -1611,6 +1642,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
         <div>
           <SectionLabel>Titel</SectionLabel>
           <input value={title} onChange={e => setTitle(e.target.value)} maxLength={60} placeholder="z. B. Zahnarzttermin"
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink placeholder-inkDim/60" />
         </div>
         <div className="flex gap-3">
@@ -1622,6 +1654,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
           <div>
             <SectionLabel>Icon</SectionLabel>
             <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+              enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
               className="w-16 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
           </div>
         </div>
@@ -1979,6 +2012,7 @@ function ProfileEditor({ profile, isNew, onSave, onCancel }) {
           <SectionLabel>Name</SectionLabel>
           <input
             value={name} onChange={e => setName(e.target.value)} placeholder="z. B. Lou"
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink placeholder-inkDim/60"
             maxLength={20}
           />
@@ -2051,6 +2085,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
         <div>
           <SectionLabel>Titel</SectionLabel>
           <input value={title} onChange={e => setTitle(e.target.value)}
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5" maxLength={40} />
         </div>
         <div>
@@ -2074,6 +2109,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
           {newCategoryMode && (
             <input value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)}
               placeholder="Name der neuen Kategorie" maxLength={30}
+              enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
               className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 mt-2" />
           )}
         </div>
@@ -2093,6 +2129,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
         <div>
           <SectionLabel>Icon (Emoji)</SectionLabel>
           <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
         </div>
         <button disabled={!canSave}
@@ -2245,7 +2282,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
   const questXpCap = getQuestXpCapToday(state, profile, today);
   const allDone = state.quests.length > 0 && state.quests.every(q => todayProgress[q.id] === 'komplett');
   const someDone = state.quests.some(q => todayProgress[q.id]);
-  const todayAgenda = getTodayAgenda(state, today, profile.id);
+  const todayAgenda = sortAgendaEntries(getTodayAgenda(state, today, profile.id).filter(e => !e.done));
 
   const categoriesWithQuests = state.questCategories.filter(cat => state.quests.some(q => q.category === cat));
 
@@ -2357,90 +2394,145 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
   }
   const boss = bossStatsForTier(state.combat.bossTier);
   const teamMax = teamHpMax(state);
-  const bossLow = state.combat.bossHp / boss.hp < 0.25;
-  const teamLow = teamMax > 0 && state.combat.teamHp / teamMax < 0.3;
+  const bossHpPct = state.combat.bossHp / boss.hp;
+  const teamHpPct = teamMax > 0 ? state.combat.teamHp / teamMax : 0;
+  const bossLow = bossHpPct < 0.25;
+  const teamLow = teamHpPct < 0.3;
 
   return (
-    <div className="px-4 pt-4 pb-28 space-y-5">
-      <div className="bg-surface border border-border rounded-2xl p-4 text-center">
-        <div className="text-5xl mb-2">{boss.emoji}</div>
-        <div className="font-display font-bold text-gold">{bossDisplayName(state.combat.bossTier)}</div>
-        <div className="text-xs text-inkDim font-stat mb-2">Boss {state.combat.bossTier + 1}</div>
-        <Bar value={state.combat.bossHp} max={boss.hp} colorClass="bg-hp" low={bossLow} />
-        <div className="text-xs text-inkDim font-stat mt-1">{state.combat.bossHp} / {boss.hp} HP</div>
+    <div className="px-4 pt-4 pb-28 space-y-4">
+
+      {/* Boss-Karte */}
+      <div className="relative rounded-2xl overflow-hidden border border-hp/30 bg-surface">
+        <div className={`absolute inset-0 transition-opacity ${bossLow ? 'opacity-20' : 'opacity-10'}`}
+          style={{ background: 'radial-gradient(ellipse at 50% 0%, #c1432f 0%, transparent 70%)' }} />
+        <div className="relative p-5 text-center">
+          <div className={`text-6xl mb-2 transition-all ${bossLow ? 'animate-pulse' : ''}`}>{boss.emoji}</div>
+          <div className="font-display font-bold text-lg text-gold tracking-wide">{bossDisplayName(state.combat.bossTier)}</div>
+          <div className="text-[10px] text-inkDim font-stat mb-3 uppercase tracking-widest">Boss {state.combat.bossTier + 1}</div>
+          <div className="h-3 rounded-full bg-bgElevated border border-border overflow-hidden">
+            <div className={`h-full rounded-full transition-all duration-500 ${bossLow ? 'bg-hp animate-pulse' : 'bg-hp'}`}
+              style={{ width: `${Math.max(0, bossHpPct * 100).toFixed(1)}%` }} />
+          </div>
+          <div className="font-stat text-xs text-inkDim mt-1.5">
+            <span className={bossLow ? 'text-hp font-semibold' : ''}>{state.combat.bossHp}</span>
+            <span className="text-inkDim/50"> / {boss.hp} HP</span>
+          </div>
+          {state.combat.bleeds.length > 0 && (
+            <div className="text-[10px] text-krieger mt-2 font-semibold">🩸 {state.combat.bleeds.length} aktive Blutung{state.combat.bleeds.length > 1 ? 'en' : ''}</div>
+          )}
+        </div>
       </div>
 
-      <div className="bg-surface border border-border rounded-2xl p-4">
+      {/* Team-HP */}
+      <div className="bg-surface border border-border rounded-2xl px-4 py-3">
         <div className="flex items-center justify-between mb-2">
-          <SectionLabel>Team-HP</SectionLabel>
+          <div className="text-xs font-semibold text-inkDim uppercase tracking-wider">Team-HP</div>
           <span className="font-stat text-xs text-inkDim">{state.combat.teamHp} / {teamMax}</span>
         </div>
-        <Bar value={state.combat.teamHp} max={teamMax} colorClass="bg-heal" low={teamLow} />
+        <div className="h-2.5 rounded-full bg-bgElevated border border-border overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-500 ${teamLow ? 'bg-hp' : 'bg-heal'}`}
+            style={{ width: `${Math.max(0, teamHpPct * 100).toFixed(1)}%` }} />
+        </div>
         {state.combat.pendingShield > 0 && (
-          <div className="text-xs text-shield mt-2">🛡️ Nächster Gegenangriff -{state.combat.pendingShield}</div>
-        )}
-        {state.combat.bleeds.length > 0 && (
-          <div className="text-xs text-krieger mt-1">🩸 {state.combat.bleeds.length} aktive Blutung(en) auf dem Boss</div>
+          <div className="text-[10px] text-shield mt-2">🛡️ Nächster Gegenangriff -{state.combat.pendingShield} durch Schild</div>
         )}
       </div>
 
-      <div className="space-y-3">
-        {profiles.filter(p => p.id === activeProfileId).map(p => {
-          const available = getAvailableActions(p);
-          return (
-            <div key={p.id} className="bg-surface border border-gold/40 rounded-2xl p-3.5">
-              <div className="flex items-center justify-between mb-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <ProfileAvatar profile={p} size={32} />
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium truncate">{p.name}</div>
-                    <div className="text-[10px] text-inkDim">{getClass(p).name} · Lvl {p.level}</div>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="font-stat text-sm text-gold">{available}</div>
-                  <div className="text-[9px] text-inkDim">verfügbar</div>
+      {/* Aktives Profil — Abilities */}
+      {profiles.filter(p => p.id === activeProfileId).map(p => {
+        const available = getAvailableActions(p);
+        const cls = getClass(p);
+        const classColor = cls.id === 'krieger' ? '#c1543c' : cls.id === 'magier' ? '#7d70e0' : '#9fd6c4';
+        return (
+          <div key={p.id} className="rounded-2xl border overflow-hidden bg-surface" style={{ borderColor: classColor + '40' }}>
+            {/* Header mit Gradient */}
+            <div className="px-4 pt-4 pb-3.5 flex items-center justify-between"
+              style={{ background: `linear-gradient(135deg, ${classColor}28 0%, transparent 70%)` }}>
+              <div className="flex items-center gap-2.5">
+                <ProfileAvatar profile={p} size={36} />
+                <div>
+                  <div className="text-sm font-semibold text-ink">{p.name}</div>
+                  <div className="text-[10px] text-inkDim">{cls.name} · Lvl {p.level}</div>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                {unlockedAbilities(p).map(a => {
-                  const disabled = a.onCooldown || available <= 0;
-                  return (
-                    <button
-                      key={a.id}
-                      disabled={disabled}
-                      onClick={() => onUseAbility(p.id, a.id)}
-                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-start justify-between gap-2 ${
-                        disabled ? 'border-border bg-bgElevated/40 opacity-50' : 'border-border bg-bgElevated active:scale-[0.98]'
-                      }`}
-                    >
-                      <div>
-                        <div className="text-xs font-semibold text-ink">
-                          {a.name}{a.onCooldown && <span className="text-inkDim font-normal"> · Abklingzeit</span>}
-                        </div>
-                        <div className="text-[10px] text-inkDim mt-0.5">{a.desc}</div>
+              <div className="text-right">
+                <div className="font-stat text-xl font-bold text-orange">{available}</div>
+                <div className="text-[9px] text-inkDim uppercase tracking-wide">Aktionen</div>
+              </div>
+            </div>
+            {/* Trennlinie in Klassenfarbe */}
+            <div className="h-px" style={{ background: `linear-gradient(90deg, transparent, ${classColor}80, transparent)` }} />
+            {/* Ability-Buttons ohne Gradient */}
+            <div className="px-3 py-3 space-y-2">
+              {unlockedAbilities(p).map(a => {
+                const disabled = a.onCooldown || available <= 0;
+                return (
+                  <button key={a.id} disabled={disabled} onClick={() => onUseAbility(p.id, a.id)}
+                    className={`w-full text-left rounded-xl border px-3.5 py-2.5 flex items-center justify-between gap-3 transition-all ${
+                      disabled ? 'border-border bg-bgElevated opacity-40' : 'border-border bg-bgElevated active:scale-[0.98]'
+                    }`}>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-semibold text-ink">
+                        {a.name}
+                        {a.onCooldown && <span className="text-inkDim font-normal ml-1">· Abklingzeit</span>}
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
+                      <div className="text-[10px] text-inkDim mt-0.5 leading-relaxed">{a.desc}</div>
+                    </div>
+                    {!disabled && (
+                      <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center border"
+                        style={{ borderColor: classColor + '60', background: classColor + '20', color: classColor }}>
+                        <span className="text-xs font-bold">▶</span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
               {available <= 0 && (
-                <div className="text-[10px] text-inkDim mt-2">Keine Aktionen übrig — erst Quests abschließen.</div>
+                <div className="text-[10px] text-inkDim pt-1 pb-0.5 text-center">Keine Aktionen übrig — erst Quests abschließen.</div>
               )}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
 
+      {/* Kampf-Log */}
       <div>
-        <SectionLabel>Kampf-Log</SectionLabel>
-        <div className="bg-surface border border-border rounded-2xl p-3 max-h-64 overflow-y-auto space-y-1.5">
-          {state.log.length === 0 && <div className="text-xs text-inkDim">Noch keine Aktionen — schließt Quests ab, um Aktionen zu verdienen, und setzt sie hier gegen den Boss ein.</div>}
-          {state.log.map(l => (
-            <div key={l.id} className="text-xs text-inkDim leading-snug">{l.text}</div>
-          ))}
+        <SectionLabel>⚔️ Kampf-Log</SectionLabel>
+        <div className="bg-surface border border-border rounded-2xl overflow-hidden">
+          <div className="max-h-52 overflow-y-auto divide-y divide-border/40">
+            {state.log.length === 0 && (
+              <div className="px-4 py-5 text-xs text-inkDim text-center leading-relaxed">
+                Noch keine Aktionen —<br />schließt Quests ab, um Aktionen zu verdienen.
+              </div>
+            )}
+            {state.log.map((l, i) => {
+              const d = new Date(l.ts);
+              const dateStr = `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.`;
+              const prevD = i < state.log.length - 1 ? new Date(state.log[i + 1].ts) : null;
+              const newDay = prevD && (d.getDate() !== prevD.getDate() || d.getMonth() !== prevD.getMonth());
+              return (
+                <React.Fragment key={l.id}>
+                  <div className={`px-3 py-2 text-xs leading-snug flex items-start gap-2 ${i === 0 ? 'text-ink' : 'text-inkDim'}`}>
+                    <span className="font-stat text-[10px] text-inkDim/60 shrink-0 pt-px">{dateStr}</span>
+                    <span>{l.text}</span>
+                  </div>
+                  {newDay && (
+                    <div className="flex items-center gap-2 px-3 py-1">
+                      <div className="flex-1 h-px bg-border/80"></div>
+                      <span className="text-[9px] text-inkDim/50 font-stat shrink-0">
+                        {`${String(prevD.getDate()).padStart(2,'0')}.${String(prevD.getMonth()+1).padStart(2,'0')}.`}
+                      </span>
+                      <div className="flex-1 h-px bg-border/80"></div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
         </div>
       </div>
+
     </div>
   );
 }
@@ -2459,6 +2551,7 @@ function AddShopItemModal({ category, onAdd, onClose }) {
         <div>
           <SectionLabel>Titel</SectionLabel>
           <input value={title} onChange={e => setTitle(e.target.value)}
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5" maxLength={40} />
         </div>
         <div>
@@ -2469,6 +2562,7 @@ function AddShopItemModal({ category, onAdd, onClose }) {
         <div>
           <SectionLabel>Icon (Emoji)</SectionLabel>
           <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
+            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
             className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
         </div>
         <button disabled={!title.trim()} onClick={() => onAdd({ title: title.trim(), cost: cost || 1, icon: icon || '🎁' })}
@@ -2881,42 +2975,61 @@ function ItemDateModal({ item, onSave, onClose }) {
 }
 
 function InventoryList({ profile, sharedInventory, onMarkDone, onSetDate }) {
-  const [dateItem, setDateItem] = useState(null); // { scope, item }
+  const [dateItem, setDateItem] = useState(null);
   const personal = (profile.inventory || []).filter(item => !item.done);
   const shared = (sharedInventory || []).filter(item => !item.done);
 
-  function ItemRow({ item, scope }) {
+  function ItemCard({ item, scope }) {
     return (
-      <div className="bg-surface border border-border rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <span className="text-sm">{item.icon} {item.title}</span>
-          {item.plannedDate && (
-            <div className="text-[10px] text-gold font-stat mt-0.5">📅 {formatShortDate(item.plannedDate)}</div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => setDateItem({ scope, item })} className="text-sm" aria-label="Datum zuordnen">📅</button>
-          <button onClick={() => onMarkDone(scope, item.id)} className="text-xs text-gold">Als erledigt markieren</button>
+      <div className="bg-surface border border-border rounded-2xl overflow-hidden">
+        <div className="flex items-stretch">
+          <div className="flex items-center justify-center w-16 shrink-0 bg-bgElevated border-r border-border text-3xl">
+            {item.icon || '🎁'}
+          </div>
+          <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-center gap-0.5">
+            <div className="text-sm font-medium text-ink leading-snug">{item.title}</div>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              {item.cost != null && (
+                <span className="text-[10px] font-stat text-gold bg-gold/10 border border-gold/30 rounded-full px-2 py-0.5">
+                  {item.cost} 🪙
+                </span>
+              )}
+              {item.plannedDate ? (
+                <button onClick={() => setDateItem({ scope, item })}
+                  className="text-[10px] font-stat text-shield bg-shield/10 border border-shield/30 rounded-full px-2 py-0.5 active:opacity-70">
+                  📅 {formatShortDate(item.plannedDate)}
+                </button>
+              ) : (
+                <button onClick={() => setDateItem({ scope, item })}
+                  className="text-[10px] text-inkDim border border-dashed border-border rounded-full px-2 py-0.5 active:opacity-70">
+                  + Datum
+                </button>
+              )}
+            </div>
+          </div>
+          <button onClick={() => onMarkDone(scope, item.id)}
+            title="Als erledigt markieren"
+            className="flex items-center justify-center w-14 shrink-0 border-l border-border text-heal text-xl active:bg-heal/10 transition-colors">
+            ✓
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
         <SectionLabel>Deine Geschenke (zu erfüllen)</SectionLabel>
-        {personal.length === 0 && <div className="text-xs text-inkDim">Noch nichts hier.</div>}
-        <div className="space-y-2">
-          {personal.map(item => <ItemRow key={item.id} item={item} scope="personal" />)}
-        </div>
+        {personal.length === 0
+          ? <div className="text-xs text-inkDim">Noch nichts hier.</div>
+          : <div className="space-y-2">{personal.map(item => <ItemCard key={item.id} item={item} scope="personal" />)}</div>}
       </div>
       <div>
         <SectionLabel>Gemeinsamer Bereich</SectionLabel>
-        {shared.length === 0 && <div className="text-xs text-inkDim">Noch nichts hier.</div>}
-        <div className="space-y-2">
-          {shared.map(item => <ItemRow key={item.id} item={item} scope="shared" />)}
-        </div>
+        {shared.length === 0
+          ? <div className="text-xs text-inkDim">Noch nichts hier.</div>
+          : <div className="space-y-2">{shared.map(item => <ItemCard key={item.id} item={item} scope="shared" />)}</div>}
       </div>
       {dateItem && (
         <ItemDateModal item={dateItem.item} onClose={() => setDateItem(null)}
@@ -2929,13 +3042,16 @@ function InventoryList({ profile, sharedInventory, onMarkDone, onSetDate }) {
 // Protokoll für den Inventar-Tab: "Erledigt" = abgeschlossene gemeinsame
 // Aktivitäten (gemeinsamer Bereich), "Bekommen" = erfüllte persönliche
 // Geschenke beider Profile, jeweils mit Empfänger gekennzeichnet.
-function InventoryLogList({ profile, partner, sharedInventory }) {
+function InventoryLogList({ profile, partner, sharedInventory, onUnmarkDone }) {
   const [open, setOpen] = useState(false);
-  const erledigt = (sharedInventory || []).filter(i => i.done);
-  const bekommen = [
-    ...(profile.inventory || []).filter(i => i.done).map(i => ({ ...i, ownerName: profile.name, ownerIcon: profile.icon })),
-    ...(partner ? (partner.inventory || []).filter(i => i.done).map(i => ({ ...i, ownerName: partner.name, ownerIcon: partner.icon })) : []),
+
+  // Erledigt = alle gemeinsamen Items die abgehakt wurden + eigene persönliche Items
+  const erledigt = [
+    ...(sharedInventory || []).filter(i => i.done).map(i => ({ ...i, scope: 'shared' })),
+    ...(profile.inventory || []).filter(i => i.done).map(i => ({ ...i, scope: 'personal' })),
   ];
+  // Bekommen = Items die der Partner für mich erfüllt hat (in partner.inventory abgehakt)
+  const bekommen = partner ? (partner.inventory || []).filter(i => i.done) : [];
 
   return (
     <div className="mt-4">
@@ -2953,7 +3069,10 @@ function InventoryLogList({ profile, partner, sharedInventory }) {
                 <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
                   <span className="text-base shrink-0 opacity-70">{item.icon}</span>
                   <span className="text-sm text-inkDim flex-1 truncate">{item.title}</span>
-                  <span className="text-heal text-sm shrink-0">✓</span>
+                  <button onClick={() => onUnmarkDone(item.scope, item.id)}
+                    title="Rückgängig machen" className="text-xs font-semibold rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95 shrink-0">
+                    ↺
+                  </button>
                 </div>
               ))}
             </div>
@@ -2965,10 +3084,7 @@ function InventoryLogList({ profile, partner, sharedInventory }) {
               {bekommen.map(item => (
                 <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
                   <span className="text-base shrink-0 opacity-70">{item.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-inkDim truncate">{item.title}</div>
-                    <div className="text-[10px] text-inkDim/70">{item.ownerIcon} {item.ownerName}</div>
-                  </div>
+                  <span className="text-sm text-inkDim flex-1 truncate">{item.title}</span>
                   <span className="text-heal text-sm shrink-0">✓</span>
                 </div>
               ))}
@@ -3648,10 +3764,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       if (scope === 'personal') {
         const p = s.profiles.find(pr => pr.id === activeProfile.id);
         const item = p.inventory.find(i => i.id === itemId);
-        if (item) item.done = true;
+        if (item) item.done = !item.done;
       } else {
         const item = s.sharedInventory.find(i => i.id === itemId);
-        if (item) item.done = true;
+        if (item) item.done = !item.done;
       }
     });
   }
@@ -3704,22 +3820,19 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // Nur im Tagesblick (Kalender-Tab), drei Stufen von oben nach unten:
   // 1. Offene Aufgaben  2. Termine  3. Erledigte Aufgaben.
   // Innerhalb jeder Stufe: Einträge mit Uhrzeit zuerst, aufsteigend sortiert.
-  const dayAgendaForCalendarTab = getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id)
-    .slice()
-    .sort((a, b) => {
-      const tierOf = (e) => (e.item.kind === 'aufgabe' && !e.done) ? 0 : e.item.kind === 'termin' ? 1 : 2;
-      const ta = tierOf(a), tb = tierOf(b);
-      if (ta !== tb) return ta - tb;
-      const aHasTime = !!a.item.time, bHasTime = !!b.item.time;
-      if (aHasTime !== bHasTime) return aHasTime ? -1 : 1;
-      if (aHasTime && bHasTime) return a.item.time < b.item.time ? -1 : a.item.time > b.item.time ? 1 : 0;
-      return 0;
-    });
+  const dayAgendaForCalendarTab = sortAgendaEntries(
+    getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id)
+  );
   const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30, activeProfile.id);
   const plannedItemDates = new Set([
     ...(activeProfile.inventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
     ...(state.sharedInventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
   ]);
+
+  const plannedItemsForDay = [
+    ...(activeProfile.inventory || []).filter(i => i.plannedDate === calendarViewedDate && !i.done),
+    ...(state.sharedInventory || []).filter(i => i.plannedDate === calendarViewedDate && !i.done),
+  ];
 
   return (
     <div className="max-w-md mx-auto min-h-screen relative">
@@ -3790,7 +3903,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             <SectionLabel>
               {calendarViewedDate === todayBerlin() ? 'Tagesblick · Heute' : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
             </SectionLabel>
-            {dayAgendaForCalendarTab.length === 0 ? (
+            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 ? (
               <div className="text-xs text-inkDim">
                 {calendarViewedDate === todayBerlin() ? 'Keine Aufgaben oder Termine heute.' : 'Keine Aufgaben oder Termine an diesem Tag.'}
               </div>
@@ -3800,6 +3913,18 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
                     onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
                     actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
+                ))}
+                {plannedItemsForDay.map(item => (
+                  <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-gold/5 px-3 py-2.5">
+                    <span className="text-lg shrink-0">{item.icon || '🎁'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-ink truncate">{item.title}</div>
+                      <div className="text-[10px] text-gold">Geplantes Item</div>
+                    </div>
+                    {item.cost != null && (
+                      <span className="text-xs font-stat text-gold shrink-0">{item.cost} 🪙</span>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -3831,7 +3956,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         <div className="px-4 pt-4 pb-28">
           <div className="font-display text-lg font-bold text-ink mb-4">🎒 Inventar</div>
           <InventoryList profile={activeProfile} sharedInventory={state.sharedInventory} onMarkDone={handleMarkInventoryDone} onSetDate={handleSetItemDate} />
-          <InventoryLogList profile={activeProfile} partner={partnerProfile} sharedInventory={state.sharedInventory} />
+          <InventoryLogList profile={activeProfile} partner={partnerProfile} sharedInventory={state.sharedInventory} onUnmarkDone={handleMarkInventoryDone} />
         </div>
       )}
       {activeTab === 'mehr' && (
