@@ -342,7 +342,7 @@ const MAX_ACTIONS_PER_DAY = 3;
 const CALENDAR_XP_PER_TASK = 5;
 const CALENDAR_XP_DAILY_CAP = 10;
 const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-const QUEST_XP_DAILY_BASE_CAP = 40;
+const QUEST_XP_DAILY_BASE_CAP = 50;
 const QUEST_XP_CAP_BONUS_PER_HARD_QUEST = 5;
 const QUEST_HARD_XP_THRESHOLD = 20; // Quests mit diesem XP-Wert zählen als "schwer" und erhöhen den Tagesdeckel
 
@@ -507,7 +507,7 @@ function freshProfile(overrides) {
     cooldowns: {},        // { abilityId: 'YYYY-MM-DD' (zuletzt benutzt) }
     inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
-    questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 40/Tag, +5 pro abgeschlossener 20XP-Quest)
+    questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 50/Tag, +10 pro Level über 1, +5 pro schwere Quest)
     sportTrackingEnabled: false, // Extra-Funktion, nur für dieses Profil ein-/ausschaltbar
     sportLog: {},                // { 'YYYY-MM-DD': { calories: number|null, protein: number|null } }
   }, overrides || {});
@@ -656,7 +656,9 @@ function getQuestXpCapToday(state, profile, today) {
     const quest = state.quests.find(q => q.id === qId);
     return quest && quest.xp === QUEST_HARD_XP_THRESHOLD;
   }).length;
-  return QUEST_XP_DAILY_BASE_CAP + hardQuestsDone * QUEST_XP_CAP_BONUS_PER_HARD_QUEST;
+  // Basis 50, +10 pro Level über Level 1, +5 pro heute abgeschlossener schwerer Quest
+  const levelBonus = (profile.level - 1) * 10;
+  return QUEST_XP_DAILY_BASE_CAP + levelBonus + hardQuestsDone * QUEST_XP_CAP_BONUS_PER_HARD_QUEST;
 }
 
 function getQuestXpEarnedToday(profile) {
