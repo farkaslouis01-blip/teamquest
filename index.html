@@ -752,6 +752,12 @@ function weekdayOfDateStr(dateStr) {
   return (d.getDay() + 6) % 7;
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 function formatShortDate(dateStr) {
   const [, m, d] = dateStr.split('-');
   return `${d}.${m}.`;
@@ -1865,12 +1871,12 @@ function DateHeading({ dateStr, showYear }) {
   );
 }
 
-function UpcomingAgendaList({ entries, profiles, onEdit, birthdays, activeProfileId }) {
+function UpcomingAgendaList({ entries, profiles, onEdit, birthdays, activeProfileId, questDeadlines, quests, questProgress }) {
   const [open, setOpen] = useState(false);
 
-  // Geburtstage der nächsten 30 Tage berechnen
   const today = todayBerlin();
-  const [ty, tm, td] = today.split('-').map(Number);
+
+  // Geburtstage der nächsten 30 Tage
   const birthdayEntries = [];
   const visibleBirthdays = (birthdays || []).filter(b => !b.isPrivate || b.creatorId === activeProfileId);
   for (let i = 0; i < 30; i++) {
@@ -1886,16 +1892,32 @@ function UpcomingAgendaList({ entries, profiles, onEdit, birthdays, activeProfil
     });
   }
 
+  // Quest-Fristen der nächsten 30 Tage (nur offene)
+  const deadlineEntries = Object.entries(questDeadlines || {})
+    .filter(([questId, d]) => {
+      if (!d || !d.date) return false;
+      if (d.date < today || d.date > addDays(today, 30)) return false;
+      const progress = (questProgress[d.date] || {})[questId];
+      return progress !== 'komplett';
+    })
+    .map(([questId, d]) => ({ questId, deadline: d, quest: (quests || []).find(q => q.id === questId) }))
+    .filter(({ quest }) => quest);
+
   // Zusammenführen und nach Datum sortieren
   const grouped = {};
   entries.forEach(e => {
-    (grouped[e.scheduledDate] = grouped[e.scheduledDate] || { agenda: [], bdays: [] }).agenda.push(e);
+    (grouped[e.scheduledDate] = grouped[e.scheduledDate] || { agenda: [], bdays: [], deadlines: [] }).agenda.push(e);
   });
   birthdayEntries.forEach(({ dateStr, b, age }) => {
-    (grouped[dateStr] = grouped[dateStr] || { agenda: [], bdays: [] }).bdays.push({ b, age });
+    (grouped[dateStr] = grouped[dateStr] || { agenda: [], bdays: [], deadlines: [] }).bdays.push({ b, age });
   });
+  deadlineEntries.forEach(({ questId, deadline, quest }) => {
+    const ds = deadline.date;
+    (grouped[ds] = grouped[ds] || { agenda: [], bdays: [], deadlines: [] }).deadlines.push({ quest, deadline });
+  });
+
   const dates = Object.keys(grouped).sort();
-  const totalCount = entries.length + birthdayEntries.length;
+  const totalCount = entries.length + birthdayEntries.length + deadlineEntries.length;
 
   return (
     <div className="mt-3">
@@ -1910,6 +1932,15 @@ function UpcomingAgendaList({ entries, profiles, onEdit, birthdays, activeProfil
             <div key={d}>
               <DateHeading dateStr={d} />
               <div className="space-y-1.5">
+                {(grouped[d].deadlines || []).map(({ quest, deadline }) => (
+                  <div key={quest.id} className="flex items-center gap-2.5 rounded-xl border border-hp/40 bg-hp/5 px-3 py-2.5">
+                    <span className="text-lg shrink-0">{quest.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-ink truncate">{quest.title}</div>
+                      <div className="text-[10px] text-hp">🔒 Frist{(!deadline.allDay && deadline.time) ? ` · ${deadline.time}` : ''}</div>
+                    </div>
+                  </div>
+                ))}
                 {(grouped[d].agenda || []).map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={profiles}
                     onComplete={() => {}} onEdit={onEdit} actionable={false} showDate={false} />
@@ -2564,7 +2595,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
 
 function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
   const [date, setDate] = useState(existing?.date || todayBerlin());
-  const [allDay, setAllDay] = useState(existing ? (!existing.time || existing.time === '09:00') : true);
+  const [allDay, setAllDay] = useState(existing ? (existing.allDay ?? true) : true);
   const [time, setTime] = useState(existing?.time || '09:00');
 
   return (
@@ -2592,7 +2623,7 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
               className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
           </div>
         )}
-        <button onClick={() => onSave({ date, time: allDay ? null : time })}
+        <button onClick={() => onSave({ date, allDay, time: allDay ? null : time })}
           className="w-full bg-gold text-bg font-semibold rounded-xl py-3 active:scale-[0.98]">
           Frist setzen
         </button>
@@ -2630,7 +2661,7 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
           <span className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</span>
           {deadline && (
             <span className={`text-[10px] font-stat ${deadlineToday ? 'text-gold font-semibold' : deadlinePast ? 'text-hp' : 'text-inkDim'}`}>
-              📅 {formatShortDate(deadline.date)}{(deadline.time && deadline.time !== '09:00') ? ` ${deadline.time}` : ''}
+              📅 {formatShortDate(deadline.date)}{(!deadline.allDay && deadline.time) ? ` ${deadline.time}` : ''}
             </span>
           )}
         </div>
@@ -2687,6 +2718,16 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
 function QuestCategorySection({ category, quests, todayProgress, questDeadlines, onComplete, onUncomplete, onSetDeadline, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const doneCount = quests.filter(q => todayProgress[q.id] === 'komplett').length;
+
+  const sorted = [...quests].sort((a, b) => {
+    const aDone = todayProgress[a.id] === 'komplett';
+    const bDone = todayProgress[b.id] === 'komplett';
+    const aHasFrist = !!(questDeadlines || {})[a.id];
+    const bHasFrist = !!(questDeadlines || {})[b.id];
+    if (aDone !== bDone) return aDone ? 1 : -1;       // abgehakt nach unten
+    if (aHasFrist !== bHasFrist) return aHasFrist ? -1 : 1; // Frist nach oben
+    return 0;
+  });
   return (
     <div className="border border-border rounded-2xl overflow-hidden bg-surface/40">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3">
@@ -2698,7 +2739,7 @@ function QuestCategorySection({ category, quests, todayProgress, questDeadlines,
       </button>
       {open && (
         <div className="px-3 pb-3 space-y-2.5">
-          {quests.map(q => (
+          {sorted.map(q => (
             <QuestCard
               key={q.id}
               quest={q}
@@ -4143,6 +4184,33 @@ function App() {
   );
 }
 
+function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onComplete }) {
+  const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
+  const done = dayProgress[quest.id] === 'komplett';
+  const failed = !done && deadline.date < todayBerlin();
+  return (
+    <div className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
+      done ? 'border-heal/40 bg-heal/5 opacity-60' :
+      failed ? 'border-border bg-surface opacity-50' :
+      'border-hp/50 bg-hp/5'
+    }`}>
+      <span className="text-lg shrink-0">{failed ? '❌' : quest.icon}</span>
+      <div className="flex-1 min-w-0">
+        <div className={`text-sm truncate ${(done || failed) ? 'line-through text-inkDim' : 'text-ink'}`}>{quest.title}</div>
+        <div className={`text-[10px] ${failed ? 'text-inkDim' : 'text-hp'}`}>
+          {failed ? 'Frist verpasst' : `🔒 Frist${(!deadline.allDay && deadline.time) ? ` · ${deadline.time}` : ''}`}
+        </div>
+      </div>
+      {!done && !failed && (
+        <button onClick={onComplete}
+          className="shrink-0 w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
+          ✓
+        </button>
+      )}
+    </div>
+  );
+}
+
 function TeamQuestApp({ pairingCode, onUnpair }) {
   const [state, setState] = useState(() => initialState());
   const [loading, setLoading] = useState(true);
@@ -4587,7 +4655,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   const myConfirmCount = state.pendingConfirmations.filter(c => c.partnerId === activeProfile.id).length;
   const todayAgendaForBadge = getTodayAgenda(state, todayBerlin(), activeProfile.id);
-  const calendarBadgeCount = todayAgendaForBadge.filter(e => !e.done && e.item.kind === 'aufgabe').length;
+  const calendarAgendaCount = todayAgendaForBadge.filter(e => !e.done && e.item.kind === 'aufgabe').length;
+  const today = todayBerlin();
+  const todayProgress = (activeProfile.questProgress || {})[today] || {};
+  const deadlineBadgeCount = Object.entries(activeProfile.questDeadlines || {})
+    .filter(([questId, d]) => d && d.date === today && todayProgress[questId] !== 'komplett').length;
+  const calendarBadgeCount = calendarAgendaCount + deadlineBadgeCount;
   const calendarViewedDate = calendarSelectedDate || todayBerlin();
   // Nur im Tagesblick (Kalender-Tab):
   // 1. Erledigtes rutscht ganz nach unten.
@@ -4617,7 +4690,22 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const questDeadlinesForDay = Object.entries(activeProfile.questDeadlines || {})
     .filter(([, d]) => d && d.date === calendarViewedDate)
     .map(([questId, d]) => ({ quest: state.quests.find(q => q.id === questId), deadline: d }))
-    .filter(({ quest }) => quest);
+    .filter(({ quest }) => quest)
+    .sort((a, b) => {
+      const today = todayBerlin();
+      const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
+      const aDone = dayProgress[a.quest.id] === 'komplett';
+      const bDone = dayProgress[b.quest.id] === 'komplett';
+      const aFailed = !aDone && a.deadline.date < today;
+      const bFailed = !bDone && b.deadline.date < today;
+      // Aktiv (weder done noch failed) → ganz oben
+      const aActive = !aDone && !aFailed;
+      const bActive = !bDone && !bFailed;
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      // Verpasst vor Erledigt
+      if (aFailed !== bFailed) return aFailed ? -1 : 1;
+      return 0;
+    });
 
   return (
     <>
@@ -4693,6 +4781,16 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               </div>
             ) : (
               <div className="space-y-2">
+                {questDeadlinesForDay.filter(({ quest, deadline }) => {
+                  const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
+                  const done = dayProgress[quest.id] === 'komplett';
+                  const failed = !done && deadline.date < todayBerlin();
+                  return !done && !failed;
+                }).map(({ quest, deadline }) => (
+                  <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
+                    calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
+                    onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
+                ))}
                 {dayAgendaForCalendarTab.map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
                     onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
@@ -4724,37 +4822,22 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                     </div>
                   );
                 })}
-                {questDeadlinesForDay.map(({ quest, deadline }) => {
+                {questDeadlinesForDay.filter(({ quest, deadline }) => {
                   const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
                   const done = dayProgress[quest.id] === 'komplett';
                   const failed = !done && deadline.date < todayBerlin();
-                  return (
-                    <div key={quest.id} className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
-                      done ? 'border-heal/40 bg-heal/5 opacity-60' :
-                      failed ? 'border-border bg-surface opacity-50' :
-                      'border-hp/50 bg-hp/5'
-                    }`}>
-                      <span className="text-lg shrink-0">{failed ? '❌' : quest.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-sm truncate ${done ? 'line-through text-inkDim' : failed ? 'line-through text-inkDim' : 'text-ink'}`}>{quest.title}</div>
-                        <div className={`text-[10px] ${failed ? 'text-inkDim' : 'text-hp'}`}>
-                          {failed ? 'Frist verpasst' : `🔒 Frist${(deadline.time && deadline.time !== '09:00') ? ` · ${deadline.time}` : ''}`}
-                        </div>
-                      </div>
-                      {!done && !failed && (
-                        <button
-                          onClick={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)}
-                          className="shrink-0 w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
-                          ✓
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+                  return done || failed;
+                }).map(({ quest, deadline }) => (
+                  <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
+                    calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
+                    onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
+                ))}
               </div>
             )}
             <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles}
               birthdays={state.birthdays} activeProfileId={activeProfile.id}
+              questDeadlines={activeProfile.questDeadlines || {}} quests={state.quests}
+              questProgress={activeProfile.questProgress || {}}
               onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
             <CompletionLogList entries={getCompletionLog(state, 100, activeProfile.id)} profiles={state.profiles} onEdit={(item) => setCalendarModal({ mode: 'edit', item })} />
           </div>
