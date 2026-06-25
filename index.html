@@ -1216,12 +1216,12 @@ function useAbility(state, profileId, abilityId) {
 }
 
 // Eine Quest-Stufe abschließen. Gibt zurück, ob dadurch eine Kampf-Aktion frei wurde.
-function completeQuestStage(state, profileId, questId, stage) {
+function completeQuestStage(state, profileId, questId, stage, date = null) {
   const profile = state.profiles.find(p => p.id === profileId);
   const quest = state.quests.find(q => q.id === questId);
   if (!profile || !quest) return { xpGained: 0, actionGranted: false, leveledUp: false };
 
-  const today = todayBerlin();
+  const today = date || todayBerlin();
   if (!profile.questProgress[today]) profile.questProgress[today] = {};
   const currentStage = profile.questProgress[today][questId] || null;
 
@@ -1234,9 +1234,6 @@ function completeQuestStage(state, profileId, questId, stage) {
   const after = questStageXp(quest, stage);
   const delta = after - before;
 
-  // Fortschritt zuerst eintragen: falls DIESE Stufe eine "schwere" (20XP-)Quest
-  // komplett macht, zählt die Deckel-Erhöhung dadurch bereits für die XP-Vergabe
-  // dieser selben Quest mit.
   profile.questProgress[today][questId] = stage;
 
   if (!profile.questXpToday || profile.questXpToday.date !== today) {
@@ -1244,7 +1241,7 @@ function completeQuestStage(state, profileId, questId, stage) {
   }
   const cap = getQuestXpCapToday(state, profile, today);
   const headroom = Math.max(0, cap - profile.questXpToday.amount);
-  // Hat diese Quest eine Frist für heute? Dann volle XP ohne Tageslimit.
+  // Hat diese Quest eine Frist für diesen Tag? Dann volle XP ohne Tageslimit.
   const deadline = (profile.questDeadlines || {})[questId];
   const hasTodayDeadline = deadline && deadline.date === today && stage === 'komplett';
   const gained = hasTodayDeadline ? delta : Math.min(delta, headroom);
@@ -2254,14 +2251,14 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
 
   // refs synchron halten
   function setQsSafe(updater) {
-    setQsSafe(prev => {
+    setQs(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       qsRef.current = next;
       return next;
     });
   }
   function setCatsSafe(updater) {
-    setCatsSafe(prev => {
+    setCats(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       catsRef.current = next;
       return next;
@@ -2567,6 +2564,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
 
 function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
   const [date, setDate] = useState(existing?.date || todayBerlin());
+  const [allDay, setAllDay] = useState(existing ? (!existing.time || existing.time === '09:00') : true);
   const [time, setTime] = useState(existing?.time || '09:00');
 
   return (
@@ -2580,12 +2578,21 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
           <input type="date" value={date} onChange={e => setDate(e.target.value)}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
         </div>
-        <div>
-          <SectionLabel>Uhrzeit</SectionLabel>
-          <input type="time" value={time} onChange={e => setTime(e.target.value)}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
+        <div className="flex items-center justify-between bg-surface border border-border rounded-xl px-3 py-2.5">
+          <span className="text-sm text-ink">Ganztägig</span>
+          <button onClick={() => setAllDay(v => !v)}
+            className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${allDay ? 'bg-gold' : 'bg-border'}`}>
+            <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${allDay ? 'left-5' : 'left-0.5'}`}></span>
+          </button>
         </div>
-        <button onClick={() => onSave({ date, time })}
+        {!allDay && (
+          <div>
+            <SectionLabel>Uhrzeit</SectionLabel>
+            <input type="time" value={time} onChange={e => setTime(e.target.value)}
+              className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-ink font-stat" />
+          </div>
+        )}
+        <button onClick={() => onSave({ date, time: allDay ? null : time })}
           className="w-full bg-gold text-bg font-semibold rounded-xl py-3 active:scale-[0.98]">
           Frist setzen
         </button>
@@ -2623,19 +2630,12 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
           <span className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</span>
           {deadline && (
             <span className={`text-[10px] font-stat ${deadlineToday ? 'text-gold font-semibold' : deadlinePast ? 'text-hp' : 'text-inkDim'}`}>
-              📅 {formatShortDate(deadline.date)} {deadline.time}
+              📅 {formatShortDate(deadline.date)}{(deadline.time && deadline.time !== '09:00') ? ` ${deadline.time}` : ''}
             </span>
           )}
         </div>
       </div>
-      <div className="flex gap-1.5 shrink-0">
-        <button onClick={() => setShowDeadline(true)}
-          title="Frist setzen" aria-label="Frist setzen"
-          className={`text-xs font-semibold rounded-lg px-2 py-2 border ${
-            deadline ? 'border-gold/50 bg-gold/10 text-gold' : 'border-border bg-bgElevated text-inkDim'
-          } active:scale-95`}>
-          📅
-        </button>
+      <div className="flex gap-1.5 shrink-0 items-center">
         <button
           onClick={() => onComplete('kurz')}
           disabled={!!stage || stage === 'kurz' || stage === 'komplett'}
@@ -2652,17 +2652,24 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
             stage === 'komplett' ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim active:scale-95'
           } disabled:opacity-50`}
         >
-          ✓ Fertig
+          ✓
         </button>
         {stage && (
           <button
             onClick={onUncomplete}
-            title="Verklickt? Rückgängig machen"
-            className="text-xs font-semibold rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95"
+            title="Rückgängig"
+            className="text-xs rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95"
           >
             ↺
           </button>
         )}
+        <button onClick={() => setShowDeadline(true)}
+          title="Frist setzen"
+          className={`text-xs rounded-lg px-2 py-2 border ${
+            deadline ? 'border-gold/50 bg-gold/10 text-gold' : 'border-border bg-bgElevated text-inkDim'
+          } active:scale-95`}>
+          📅
+        </button>
       </div>
       {showDeadline && (
         <QuestDeadlineModal
@@ -3388,6 +3395,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
               (profile.sportLog[dateStr].calories != null || profile.sportLog[dateStr].protein != null || profile.sportLog[dateStr].weight != null));
             const [bYear, bMonth, bDay] = dateStr.split('-').map(Number);
             const hasBirthday = (birthdays || []).some(b => b.day === bDay && b.month === bMonth && (!b.isPrivate || b.creatorId === profile.id));
+            const hasDeadline = Object.values(profile.questDeadlines || {}).some(d => d && d.date === dateStr);
             const isSelected = selectedDate === dateStr;
             const isToday = dateStr === todayBerlin();
             return (
@@ -3406,6 +3414,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                   {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
                   {hasSport && <span className="w-1.5 h-1.5 rounded-full bg-sport"></span>}
                   {hasBirthday && <span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>}
+                  {hasDeadline && <span className="w-1.5 h-1.5 rounded-full bg-hp flex items-center justify-center text-[6px] text-white font-bold leading-none">!</span>}
                 </span>
               </button>
             );
@@ -4287,10 +4296,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     );
   }
 
-  function handleQuestComplete(questId, stage) {
+  function handleQuestComplete(questId, stage, date = null) {
     let result;
     const next = update(s => {
-      result = completeQuestStage(s, activeProfile.id, questId, stage);
+      result = completeQuestStage(s, activeProfile.id, questId, stage, date);
     });
     if (result.alreadyDone) return;
     const newLevel = next.profiles.find(p => p.id === activeProfile.id).level;
@@ -4715,15 +4724,33 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                     </div>
                   );
                 })}
-                {questDeadlinesForDay.map(({ quest, deadline }) => (
-                  <div key={quest.id} className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-gold/5 px-3 py-2.5">
-                    <span className="text-lg shrink-0">{quest.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-ink truncate">{quest.title}</div>
-                      <div className="text-[10px] text-gold">🔒 Quest-Frist · {deadline.time} · {quest.xp} XP</div>
+                {questDeadlinesForDay.map(({ quest, deadline }) => {
+                  const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
+                  const done = dayProgress[quest.id] === 'komplett';
+                  const failed = !done && deadline.date < todayBerlin();
+                  return (
+                    <div key={quest.id} className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
+                      done ? 'border-heal/40 bg-heal/5 opacity-60' :
+                      failed ? 'border-border bg-surface opacity-50' :
+                      'border-hp/50 bg-hp/5'
+                    }`}>
+                      <span className="text-lg shrink-0">{failed ? '❌' : quest.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm truncate ${done ? 'line-through text-inkDim' : failed ? 'line-through text-inkDim' : 'text-ink'}`}>{quest.title}</div>
+                        <div className={`text-[10px] ${failed ? 'text-inkDim' : 'text-hp'}`}>
+                          {failed ? 'Frist verpasst' : `🔒 Frist${(deadline.time && deadline.time !== '09:00') ? ` · ${deadline.time}` : ''}`}
+                        </div>
+                      </div>
+                      {!done && !failed && (
+                        <button
+                          onClick={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)}
+                          className="shrink-0 w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
+                          ✓
+                        </button>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles}
@@ -4744,6 +4771,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             {(state.birthdays && state.birthdays.length > 0) && (
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>Geburtstag</span>
             )}
+            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-hp flex items-center justify-center text-[6px] text-white font-bold">!</span>Frist</span>
           </div>
         </div>
       )}
