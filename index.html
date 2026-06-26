@@ -516,9 +516,10 @@ function freshProfile(overrides) {
     inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
     questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 50/Tag, +10 pro Level über 1, +5 pro schwere Quest)
-    sportTrackingEnabled: false, // Extra-Funktion, nur für dieses Profil ein-/ausschaltbar
-    sportLog: {},                // { 'YYYY-MM-DD': { calories, protein, weight } }
-    questDeadlines: {},          // { questId: { date: 'YYYY-MM-DD', time: 'HH:MM' } } — persönliche Fristen
+    sportTrackingEnabled: false,
+    sportLog: {},
+    questDeadlines: {},
+    alarmEnabled: false,
   }, overrides || {});
 }
 
@@ -576,11 +577,13 @@ function migrateState(loaded) {
   // "Bonus-Aufgabe" wurde bewusst entfernt — falls noch aus einem alten Stand vorhanden, raus damit.
   quests = quests.filter(q => q.title !== 'Bonus-Aufgabe');
 
-  // Neue Standard-Quests (z. B. aus einem späteren Feature-Update) ergänzen,
-  // die im alten gespeicherten Stand noch fehlen — eigene/angepasste Quests bleiben unangetastet.
+  // Neue Standard-Quests ergänzen — aber nur, wenn sie nicht vom Nutzer bewusst gelöscht wurden.
+  // Gelöschte Default-Quest-IDs werden in deletedDefaultQuestIds gespeichert.
+  if (!Array.isArray(merged.deletedDefaultQuestIds)) merged.deletedDefaultQuestIds = [];
+  const deletedSet = new Set(merged.deletedDefaultQuestIds);
   const existingIds = new Set(quests.map(q => q.id));
   DEFAULT_QUESTS.forEach(dq => {
-    if (!existingIds.has(dq.id)) quests.push(Object.assign({}, dq));
+    if (!existingIds.has(dq.id) && !deletedSet.has(dq.id)) quests.push(Object.assign({}, dq));
   });
   merged.quests = quests;
 
@@ -1777,7 +1780,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   );
 }
 
-function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate }) {
+function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate, showAlarm }) {
   const { item, scheduledDate, done, overdue } = entry;
   const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
   const escalated = overdue >= 7 ? 'hp' : overdue >= 3 ? 'orange' : null;
@@ -1829,6 +1832,17 @@ function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, acti
             {creator.icon} {creator.name}
           </span>
         )}
+        {item.time && showAlarm && (() => {
+          const [h, min] = item.time.split(':');
+          const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(item.title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
+          return (
+            <a href={url} onClick={e => e.stopPropagation()}
+              title="Wecker stellen" style={{ textDecoration: 'none' }}
+              className="text-sm rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
+              ⏰
+            </a>
+          );
+        })()}
         {item.exportToCalendar !== false && (
           <button onClick={(e) => { e.stopPropagation(); exportItemToCalendar(item, scheduledDate); }}
             title="Zum Handy-Kalender hinzufügen" aria-label="Zum Handy-Kalender hinzufügen"
@@ -2638,16 +2652,21 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
   );
 }
 
-function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDeadline }) {
+function QuestCard({ quest, stage, deadline, questProgress, onComplete, onUncomplete, onSetDeadline }) {
   const [expanded, setExpanded] = useState(false);
   const [showDeadline, setShowDeadline] = useState(false);
   const today = todayBerlin();
-  const deadlineToday = deadline && deadline.date === today;
-  const deadlinePast = deadline && deadline.date < today;
+
+  // Frist inaktiv wenn: abgelaufen, heute erledigt, oder jemals am Frist-Tag erledigt
+  const completedOnDeadlineDay = deadline &&
+    (questProgress[deadline.date] || {})[quest.id] === 'komplett';
+  const activeDeadline = deadline && deadline.date >= today && stage !== 'komplett' && !completedOnDeadlineDay
+    ? deadline : null;
+  const deadlineToday = activeDeadline && activeDeadline.date === today;
 
   return (
     <div className={`bg-surface border rounded-2xl p-3.5 flex items-center gap-3 ${
-      deadlineToday ? 'border-gold/60' : deadlinePast ? 'border-hp/50' : 'border-border'
+      deadlineToday ? 'border-gold/60' : 'border-border'
     }`}>
       <div className="text-2xl w-9 text-center shrink-0">{quest.icon}</div>
       <div className="flex-1 min-w-0">
@@ -2659,9 +2678,9 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
         </button>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</span>
-          {deadline && (
-            <span className={`text-[10px] font-stat ${deadlineToday ? 'text-gold font-semibold' : deadlinePast ? 'text-hp' : 'text-inkDim'}`}>
-              📅 {formatShortDate(deadline.date)}{(!deadline.allDay && deadline.time) ? ` ${deadline.time}` : ''}
+          {activeDeadline && (
+            <span className={`text-[10px] font-stat ${deadlineToday ? 'text-gold font-semibold' : 'text-inkDim'}`}>
+              📅 {formatShortDate(activeDeadline.date)}{(!activeDeadline.allDay && activeDeadline.time) ? ` ${activeDeadline.time}` : ''}
             </span>
           )}
         </div>
@@ -2697,7 +2716,7 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
         <button onClick={() => setShowDeadline(true)}
           title="Frist setzen"
           className={`text-xs rounded-lg px-2 py-2 border ${
-            deadline ? 'border-gold/50 bg-gold/10 text-gold' : 'border-border bg-bgElevated text-inkDim'
+            activeDeadline ? 'border-gold/50 bg-gold/10 text-gold' : 'border-border bg-bgElevated text-inkDim'
           } active:scale-95`}>
           📅
         </button>
@@ -2705,7 +2724,7 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
       {showDeadline && (
         <QuestDeadlineModal
           quest={quest}
-          existing={deadline || null}
+          existing={activeDeadline || null}
           onSave={d => { onSetDeadline(quest.id, d); setShowDeadline(false); }}
           onDelete={() => { onSetDeadline(quest.id, null); setShowDeadline(false); }}
           onClose={() => setShowDeadline(false)}
@@ -2715,7 +2734,7 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
   );
 }
 
-function QuestCategorySection({ category, quests, todayProgress, questDeadlines, onComplete, onUncomplete, onSetDeadline, defaultOpen }) {
+function QuestCategorySection({ category, quests, todayProgress, questDeadlines, questProgress, onComplete, onUncomplete, onSetDeadline, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const doneCount = quests.filter(q => todayProgress[q.id] === 'komplett').length;
 
@@ -2745,6 +2764,7 @@ function QuestCategorySection({ category, quests, todayProgress, questDeadlines,
               quest={q}
               stage={todayProgress[q.id] || null}
               deadline={(questDeadlines || {})[q.id] || null}
+              questProgress={questProgress}
               onComplete={(stage) => onComplete(q.id, stage)}
               onUncomplete={() => onUncomplete(q.id)}
               onSetDeadline={onSetDeadline}
@@ -2803,6 +2823,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
             quests={state.quests.filter(q => q.category === cat)}
             todayProgress={todayProgress}
             questDeadlines={questDeadlines}
+            questProgress={profile.questProgress || {}}
             onComplete={onQuestComplete}
             onUncomplete={onQuestUncomplete}
             onSetDeadline={onSetDeadline}
@@ -3868,7 +3889,7 @@ function BirthdaysSection({ birthdays, activeProfileId, onAdd, onDelete }) {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onAddBirthday, onDeleteBirthday }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleAlarm, onAddBirthday, onDeleteBirthday }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -3952,6 +3973,18 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
               📊 Analyse
             </button>
           )}
+          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-ink">⏰ Wecker übertragen</div>
+              <div className="text-xs text-inkDim mt-1 leading-relaxed">
+                Zeigt im Tagesblick bei Aufgaben, Terminen und Fristen mit Uhrzeit einen Knopf, um direkt einen Wecker in der Wecker-App zu stellen (Android).
+              </div>
+            </div>
+            <button onClick={onToggleAlarm}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.alarmEnabled ? 'bg-gold' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.alarmEnabled ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -4184,7 +4217,7 @@ function App() {
   );
 }
 
-function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onComplete }) {
+function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, alarmEnabled, onComplete }) {
   const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
   const done = dayProgress[quest.id] === 'komplett';
   const failed = !done && deadline.date < todayBerlin();
@@ -4202,10 +4235,22 @@ function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onCom
         </div>
       </div>
       {!done && !failed && (
-        <button onClick={onComplete}
-          className="shrink-0 w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
-          ✓
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {!deadline.allDay && deadline.time && alarmEnabled && (() => {
+            const [h, min] = deadline.time.split(':');
+            const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Frist: ' + quest.title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
+            return (
+              <a href={url} title="Wecker stellen" style={{ textDecoration: 'none' }}
+                className="w-8 h-8 rounded-lg border border-border bg-bgElevated text-inkDim text-sm flex items-center justify-center active:scale-95">
+                ⏰
+              </a>
+            );
+          })()}
+          <button onClick={onComplete}
+            className="w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
+            ✓
+          </button>
+        </div>
       )}
     </div>
   );
@@ -4277,18 +4322,20 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
     const unsubscribe = Storage.subscribe(pairingCode, (data) => {
       const incoming = migrateState(data) || initialState();
+      // Abgelaufene Fristen bereinigen
+      const today = todayBerlin();
+      incoming.profiles.forEach(p => {
+        if (!p.questDeadlines) return;
+        Object.keys(p.questDeadlines).forEach(id => {
+          const d = p.questDeadlines[id];
+          if (d && d.date < today) delete p.questDeadlines[id];
+        });
+      });
       isRemoteUpdate.current = true;
       setState(prev => {
-        // Quests: gewinnt wer den neueren Timestamp hat.
-        // Verhindert dass Partner-Writes eine lokale Quest-Löschung überschreiben.
         const localQuestsNewer = (prev.questsUpdatedAt || 0) > (incoming.questsUpdatedAt || 0);
         if (localQuestsNewer) {
-          return {
-            ...incoming,
-            quests: prev.quests,
-            questCategories: prev.questCategories,
-            questsUpdatedAt: prev.questsUpdatedAt,
-          };
+          return { ...incoming, quests: prev.quests, questCategories: prev.questCategories, questsUpdatedAt: prev.questsUpdatedAt };
         }
         return incoming;
       });
@@ -4368,6 +4415,11 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     let result;
     const next = update(s => {
       result = completeQuestStage(s, activeProfile.id, questId, stage, date);
+      // Frist nach Erledigung löschen
+      if (stage === 'komplett') {
+        const p = s.profiles.find(pr => pr.id === activeProfile.id);
+        if (p && p.questDeadlines) delete p.questDeadlines[questId];
+      }
     });
     if (result.alreadyDone) return;
     const newLevel = next.profiles.find(p => p.id === activeProfile.id).level;
@@ -4392,6 +4444,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     update(s => {
       const p = s.profiles.find(p => p.id === activeProfile.id);
       if (p) p.sportTrackingEnabled = !p.sportTrackingEnabled;
+    });
+  }
+
+  function handleToggleAlarm() {
+    update(s => {
+      const p = s.profiles.find(p => p.id === activeProfile.id);
+      if (p) p.alarmEnabled = !p.alarmEnabled;
     });
   }
 
@@ -4456,9 +4515,18 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   function handleEditQuests(newCategories, newQuests) {
     update(s => {
+      // IDs von Standard-Quests die entfernt wurden → Blockliste
+      const defaultIds = new Set(DEFAULT_QUESTS.map(q => q.id));
+      const newIds = new Set(newQuests.map(q => q.id));
+      if (!Array.isArray(s.deletedDefaultQuestIds)) s.deletedDefaultQuestIds = [];
+      const deletedSet = new Set(s.deletedDefaultQuestIds);
+      defaultIds.forEach(id => {
+        if (!newIds.has(id)) deletedSet.add(id);
+      });
+      s.deletedDefaultQuestIds = [...deletedSet];
       s.questCategories = newCategories;
       s.quests = newQuests;
-      s.questsUpdatedAt = Date.now(); // Timestamp → gewinnt beim Merge gegen ältere Partner-Writes
+      s.questsUpdatedAt = Date.now();
     });
     pushToast('Gespeichert.', 'info');
   }
@@ -4789,12 +4857,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                 }).map(({ quest, deadline }) => (
                   <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
                     calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
-                    onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
+                    alarmEnabled={activeProfile.alarmEnabled} onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
                 ))}
                 {dayAgendaForCalendarTab.map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
                     onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
-                    actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
+                    actionable={calendarViewedDate <= todayBerlin()} showDate={false} showAlarm={activeProfile.alarmEnabled} />
                 ))}
                 {plannedItemsForDay.map(item => (
                   <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-gold/5 px-3 py-2.5">
@@ -4830,7 +4898,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                 }).map(({ quest, deadline }) => (
                   <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
                     calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
-                    onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
+                    alarmEnabled={activeProfile.alarmEnabled} onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
                 ))}
               </div>
             )}
@@ -4891,6 +4959,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
           onToggleSportTracking={handleToggleSportTracking}
+          onToggleAlarm={handleToggleAlarm}
           onAddBirthday={handleAddBirthday}
           onDeleteBirthday={handleDeleteBirthday}
         />
