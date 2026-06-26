@@ -1787,9 +1787,8 @@ function openAlarm(title, timeStr) {
     `i.android.intent.extra.alarm.HOUR=${Number(h)}`,
     `i.android.intent.extra.alarm.MINUTES=${Number(min)}`,
     `B.android.intent.extra.alarm.SKIP_UI=false`,
-    `package=com.google.android.deskclock`,
   ].join(';');
-  const url = `intent://alarm/#Intent;action=android.intent.action.SET_ALARM;${extras};end`;
+  const url = `intent:#Intent;action=android.intent.action.SET_ALARM;${extras};end`;
   const a = document.createElement('a');
   a.href = url;
   a.style.display = 'none';
