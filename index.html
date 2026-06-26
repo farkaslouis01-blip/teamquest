@@ -1780,6 +1780,12 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   );
 }
 
+function openAlarm(title, timeStr) {
+  const [h, min] = timeStr.split(':');
+  const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
+  window.location.href = url;
+}
+
 function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate, showAlarm }) {
   const { item, scheduledDate, done, overdue } = entry;
   const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
@@ -1832,17 +1838,13 @@ function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, acti
             {creator.icon} {creator.name}
           </span>
         )}
-        {item.time && showAlarm && (() => {
-          const [h, min] = item.time.split(':');
-          const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(item.title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
-          return (
-            <a href={url} onClick={e => e.stopPropagation()}
-              title="Wecker stellen" style={{ textDecoration: 'none' }}
-              className="text-sm rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
-              ⏰
-            </a>
-          );
-        })()}
+        {item.time && showAlarm && (
+          <button onClick={e => { e.stopPropagation(); openAlarm(item.title, item.time); }}
+            title="Wecker stellen"
+            className="text-sm rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
+            ⏰
+          </button>
+        )}
         {item.exportToCalendar !== false && (
           <button onClick={(e) => { e.stopPropagation(); exportItemToCalendar(item, scheduledDate); }}
             title="Zum Handy-Kalender hinzufügen" aria-label="Zum Handy-Kalender hinzufügen"
@@ -4237,13 +4239,12 @@ function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, alarm
       {!done && !failed && (
         <div className="flex items-center gap-1.5 shrink-0">
           {!deadline.allDay && deadline.time && alarmEnabled && (() => {
-            const [h, min] = deadline.time.split(':');
-            const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent('Frist: ' + quest.title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
             return (
-              <a href={url} title="Wecker stellen" style={{ textDecoration: 'none' }}
+              <button onClick={() => openAlarm('Frist: ' + quest.title, deadline.time)}
+                title="Wecker stellen"
                 className="w-8 h-8 rounded-lg border border-border bg-bgElevated text-inkDim text-sm flex items-center justify-center active:scale-95">
                 ⏰
-              </a>
+              </button>
             );
           })()}
           <button onClick={onComplete}
