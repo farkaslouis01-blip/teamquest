@@ -1782,8 +1782,21 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
 
 function openAlarm(title, timeStr) {
   const [h, min] = timeStr.split(':');
-  const url = `intent:#Intent;action=android.intent.action.SET_ALARM;S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(title)};i.android.intent.extra.alarm.HOUR=${Number(h)};i.android.intent.extra.alarm.MINUTES=${Number(min)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
-  window.location.href = url;
+  const extras = [
+    `S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(title)}`,
+    `i.android.intent.extra.alarm.HOUR=${Number(h)}`,
+    `i.android.intent.extra.alarm.MINUTES=${Number(min)}`,
+    `B.android.intent.extra.alarm.SKIP_UI=false`,
+  ].join(';');
+  // intent://hostname/#Intent;...;end — korrekte Chrome-PWA-Format
+  const url = `intent://alarm/#Intent;action=android.intent.action.SET_ALARM;${extras};end`;
+  // Verstecktes Anchor-Element ist zuverlässiger als window.location in PWA
+  const a = document.createElement('a');
+  a.href = url;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => document.body.removeChild(a), 200);
 }
 
 function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate, showAlarm }) {
