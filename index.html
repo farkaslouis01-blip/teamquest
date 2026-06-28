@@ -595,11 +595,13 @@ function migrateState(loaded) {
   // Shop-Katalog: neue Standard-Items (Erweiterung) ergänzen, die im alten
   // gespeicherten Stand noch fehlen — eigene/angepasste Items bleiben unangetastet.
   if (!merged.shop || typeof merged.shop !== 'object') merged.shop = { gemeinsam: [], geschenk: [] };
+  if (!Array.isArray(merged.deletedDefaultShopIds)) merged.deletedDefaultShopIds = [];
+  const deletedShopSet = new Set(merged.deletedDefaultShopIds);
   ['gemeinsam', 'geschenk'].forEach(cat => {
     const defaults = cat === 'gemeinsam' ? SHOP_GEMEINSAM : SHOP_GESCHENK;
     const list = Array.isArray(merged.shop[cat]) ? merged.shop[cat] : [];
     const existingIds = new Set(list.map(i => i.id));
-    defaults.forEach(d => { if (!existingIds.has(d.id)) list.push(Object.assign({}, d)); });
+    defaults.forEach(d => { if (!existingIds.has(d.id) && !deletedShopSet.has(d.id)) list.push(Object.assign({}, d)); });
     merged.shop[cat] = list;
   });
   // Filmabend-Preis wurde bewusst von 60 auf 50 angepasst — nur überschreiben,
@@ -4673,6 +4675,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   function handleEditShopItems(items) {
     update(s => {
+      // IDs von Default-Shop-Items die entfernt wurden → Blockliste
+      const allDefaults = new Set([...SHOP_GEMEINSAM, ...SHOP_GESCHENK].map(i => i.id));
+      const newIds = new Set([...items.gemeinsam, ...items.geschenk].map(i => i.id));
+      if (!Array.isArray(s.deletedDefaultShopIds)) s.deletedDefaultShopIds = [];
+      const deletedSet = new Set(s.deletedDefaultShopIds);
+      allDefaults.forEach(id => { if (!newIds.has(id)) deletedSet.add(id); });
+      s.deletedDefaultShopIds = [...deletedSet];
       s.shop.gemeinsam = items.gemeinsam;
       s.shop.geschenk = items.geschenk;
     });
