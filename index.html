@@ -761,6 +761,21 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
+function daysUntil(dateStr) {
+  const today = todayBerlin();
+  const d1 = new Date(today + 'T00:00:00');
+  const d2 = new Date(dateStr + 'T00:00:00');
+  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+}
+
+function deadlineLabel(dateStr) {
+  const n = daysUntil(dateStr);
+  if (n < 0) return null; // abgelaufen
+  if (n === 0) return 'Heute!';
+  if (n === 1) return 'Noch 1 Tag';
+  return `Noch ${n} Tage`;
+}
+
 function formatShortDate(dateStr) {
   const [, m, d] = dateStr.split('-');
   return `${d}.${m}.`;
@@ -1250,10 +1265,10 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
   }
   const cap = getQuestXpCapToday(state, profile, today);
   const headroom = Math.max(0, cap - profile.questXpToday.amount);
-  // Hat diese Quest eine Frist für diesen Tag? Dann volle XP ohne Tageslimit.
+  // Hat diese Quest eine aktive Frist (noch nicht abgelaufen)? → volle XP ohne Cap
   const deadline = (profile.questDeadlines || {})[questId];
-  const hasTodayDeadline = deadline && deadline.date === today && stage === 'komplett';
-  const gained = hasTodayDeadline ? delta : Math.min(delta, headroom);
+  const hasActiveFrist = deadline && deadline.date >= today && stage === 'komplett';
+  const gained = hasActiveFrist ? delta : Math.min(delta, headroom);
 
   const levelBefore = profile.level;
   grantXp(profile, gained);
@@ -1780,24 +1795,7 @@ function CalendarItemModal({ editingItem, defaultDate, onSave, onDelete, onClose
   );
 }
 
-function openAlarm(title, timeStr) {
-  const [h, min] = timeStr.split(':');
-  const extras = [
-    `S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(title)}`,
-    `i.android.intent.extra.alarm.HOUR=${Number(h)}`,
-    `i.android.intent.extra.alarm.MINUTES=${Number(min)}`,
-    `B.android.intent.extra.alarm.SKIP_UI=false`,
-  ].join(';');
-  const url = `intent:#Intent;action=android.intent.action.SET_ALARM;${extras};end`;
-  const a = document.createElement('a');
-  a.href = url;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => document.body.removeChild(a), 200);
-}
-
-function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate, showAlarm }) {
+function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, actionable, showDate }) {
   const { item, scheduledDate, done, overdue } = entry;
   const grayedOut = !done && item.kind === 'aufgabe' && !item.carryForward && overdue === 0 && scheduledDate < todayBerlin();
   const escalated = overdue >= 7 ? 'hp' : overdue >= 3 ? 'orange' : null;
@@ -1849,13 +1847,7 @@ function AgendaItemRow({ entry, profiles, onComplete, onUncomplete, onEdit, acti
             {creator.icon} {creator.name}
           </span>
         )}
-        {item.time && showAlarm && (
-          <button onClick={e => { e.stopPropagation(); openAlarm(item.title, item.time); }}
-            title="Wecker stellen"
-            className="text-sm rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95">
-            ⏰
-          </button>
-        )}
+
         {item.exportToCalendar !== false && (
           <button onClick={(e) => { e.stopPropagation(); exportItemToCalendar(item, scheduledDate); }}
             title="Zum Handy-Kalender hinzufügen" aria-label="Zum Handy-Kalender hinzufügen"
@@ -2665,15 +2657,78 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
   );
 }
 
-function QuestCard({ quest, stage, deadline, questProgress, onComplete, onUncomplete, onSetDeadline }) {
+// Karussell für Fristen — native scroll-snap für Swipe-Animation
+function DeadlineCarousel({ deadlines, onComplete }) {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const scrollRef = useRef(null);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const cardW = el.firstChild?.offsetWidth || el.offsetWidth;
+    const idx = Math.round(el.scrollLeft / (cardW + 10));
+    setActiveIdx(Math.max(0, Math.min(idx, deadlines.length - 1)));
+  }
+
+  return (
+    <div>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{
+          display: 'flex',
+          overflowX: 'auto',
+          scrollSnapType: 'x mandatory',
+          WebkitOverflowScrolling: 'touch',
+          gap: 10,
+          paddingRight: deadlines.length > 1 ? 44 : 0,
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+        }}
+        className="[&::-webkit-scrollbar]:hidden"
+      >
+        {deadlines.map(({ quest, deadline }) => {
+          const label = deadlineLabel(deadline.date);
+          const days = daysUntil(deadline.date);
+          const urgent = days <= 1;
+          return (
+            <div key={quest.id}
+              style={{ minWidth: deadlines.length > 1 ? 'calc(100% - 54px)' : '100%', scrollSnapAlign: 'start', flex: 'none' }}
+              className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${urgent ? 'border-hp/60 bg-hp/5' : 'border-orange/40 bg-orange/5'}`}>
+              <span className="text-lg shrink-0">{quest.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-ink truncate">{quest.title}</div>
+                <div className={`text-[10px] font-bold ${urgent ? 'text-hp' : 'text-orange'}`}>
+                  🔒 {label}{(!deadline.allDay && deadline.time) ? ` · ${deadline.time}` : ''}
+                </div>
+              </div>
+              <button onClick={() => onComplete(quest.id)}
+                className="shrink-0 border border-heal/50 bg-heal/10 text-heal text-xs font-semibold rounded-lg px-2.5 py-2 active:scale-95">
+                Fertig
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {deadlines.length > 1 && (
+        <div className="flex justify-center gap-1.5 mt-1.5">
+          {deadlines.map((_, i) => (
+            <div key={i} style={{ transition: 'all 200ms' }}
+              className={`rounded-full h-1.5 ${i === activeIdx ? 'w-4 bg-orange' : 'w-1.5 bg-border'}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDeadline }) {
   const [expanded, setExpanded] = useState(false);
   const [showDeadline, setShowDeadline] = useState(false);
   const today = todayBerlin();
 
-  // Frist inaktiv wenn: abgelaufen, heute erledigt, oder jemals am Frist-Tag erledigt
-  const completedOnDeadlineDay = deadline &&
-    (questProgress[deadline.date] || {})[quest.id] === 'komplett';
-  const activeDeadline = deadline && deadline.date >= today && stage !== 'komplett' && !completedOnDeadlineDay
+  // Frist inaktiv wenn: abgelaufen oder heute erledigt
+  const activeDeadline = deadline && deadline.date >= today && stage !== 'komplett'
     ? deadline : null;
   const deadlineToday = activeDeadline && activeDeadline.date === today;
 
@@ -2691,23 +2746,29 @@ function QuestCard({ quest, stage, deadline, questProgress, onComplete, onUncomp
         </button>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</span>
-          {activeDeadline && (
-            <span className={`text-[10px] font-stat ${deadlineToday ? 'text-gold font-semibold' : 'text-inkDim'}`}>
-              📅 {formatShortDate(activeDeadline.date)}{(!activeDeadline.allDay && activeDeadline.time) ? ` ${activeDeadline.time}` : ''}
-            </span>
-          )}
+          {activeDeadline && (() => {
+            const label = deadlineLabel(activeDeadline.date);
+            const urgent = daysUntil(activeDeadline.date) <= 1;
+            return (
+              <span className={`text-[10px] font-stat font-bold ${urgent ? 'text-hp' : 'text-orange'}`}>
+                📅 {label}{(!activeDeadline.allDay && activeDeadline.time) ? ` · ${activeDeadline.time}` : ''}
+              </span>
+            );
+          })()}
         </div>
       </div>
       <div className="flex gap-1.5 shrink-0 items-center">
-        <button
-          onClick={() => onComplete('kurz')}
-          disabled={!!stage || stage === 'kurz' || stage === 'komplett'}
-          className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
-            stage === 'kurz' || stage === 'komplett' ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-bgElevated border-border text-inkDim active:scale-95'
-          } disabled:opacity-50`}
-        >
-          Kurz
-        </button>
+        {stage !== 'komplett' && (
+          <button
+            onClick={() => onComplete('kurz')}
+            disabled={stage === 'kurz'}
+            className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
+              stage === 'kurz' ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-bgElevated border-border text-inkDim active:scale-95'
+            } disabled:opacity-50`}
+          >
+            Kurz
+          </button>
+        )}
         <button
           onClick={() => onComplete('komplett')}
           disabled={stage === 'komplett'}
@@ -2747,19 +2808,10 @@ function QuestCard({ quest, stage, deadline, questProgress, onComplete, onUncomp
   );
 }
 
-function QuestCategorySection({ category, quests, todayProgress, questDeadlines, questProgress, onComplete, onUncomplete, onSetDeadline, defaultOpen }) {
+function QuestCategorySection({ category, quests, todayProgress, questDeadlines, onComplete, onUncomplete, onSetDeadline, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const doneCount = quests.filter(q => todayProgress[q.id] === 'komplett').length;
 
-  const sorted = [...quests].sort((a, b) => {
-    const aDone = todayProgress[a.id] === 'komplett';
-    const bDone = todayProgress[b.id] === 'komplett';
-    const aHasFrist = !!(questDeadlines || {})[a.id];
-    const bHasFrist = !!(questDeadlines || {})[b.id];
-    if (aDone !== bDone) return aDone ? 1 : -1;       // abgehakt nach unten
-    if (aHasFrist !== bHasFrist) return aHasFrist ? -1 : 1; // Frist nach oben
-    return 0;
-  });
   return (
     <div className="border border-border rounded-2xl overflow-hidden bg-surface/40">
       <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3">
@@ -2771,13 +2823,12 @@ function QuestCategorySection({ category, quests, todayProgress, questDeadlines,
       </button>
       {open && (
         <div className="px-3 pb-3 space-y-2.5">
-          {sorted.map(q => (
+          {quests.map(q => (
             <QuestCard
               key={q.id}
               quest={q}
               stage={todayProgress[q.id] || null}
               deadline={(questDeadlines || {})[q.id] || null}
-              questProgress={questProgress}
               onComplete={(stage) => onComplete(q.id, stage)}
               onUncomplete={() => onUncomplete(q.id)}
               onSetDeadline={onSetDeadline}
@@ -2803,6 +2854,17 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
   const todayAgenda = sortAgendaEntries(getTodayAgenda(state, today, profile.id).filter(e => !e.done));
   const questDeadlines = profile.questDeadlines || {};
 
+  // Offene Fristen für den Quest-Tab
+  const upcomingDeadlinesForQuestTab = Object.entries(questDeadlines)
+    .filter(([questId, d]) => {
+      if (!d || !d.date || d.date < today) return false;
+      const progress = (profile.questProgress[d.date] || {})[questId];
+      return progress !== 'komplett';
+    })
+    .map(([questId, d]) => ({ quest: state.quests.find(q => q.id === questId), deadline: d }))
+    .filter(({ quest }) => quest)
+    .sort((a, b) => a.deadline.date.localeCompare(b.deadline.date));
+
   const categoriesWithQuests = state.questCategories.filter(cat => state.quests.some(q => q.category === cat));
 
   return (
@@ -2815,6 +2877,13 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
         onEdit={onOpenEditCalendar}
         onAddClick={onOpenAddCalendar}
       />
+
+      {upcomingDeadlinesForQuestTab.length > 0 && (
+        <DeadlineCarousel
+          deadlines={upcomingDeadlinesForQuestTab}
+          onComplete={(questId) => onQuestComplete(questId, 'komplett')}
+        />
+      )}
 
       <div className="flex items-center justify-between">
         <div className="font-display text-lg font-bold text-ink">
@@ -2836,7 +2905,6 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
             quests={state.quests.filter(q => q.category === cat)}
             todayProgress={todayProgress}
             questDeadlines={questDeadlines}
-            questProgress={profile.questProgress || {}}
             onComplete={onQuestComplete}
             onUncomplete={onQuestUncomplete}
             onSetDeadline={onSetDeadline}
@@ -3902,7 +3970,7 @@ function BirthdaysSection({ birthdays, activeProfileId, onAdd, onDelete }) {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleAlarm, onAddBirthday, onDeleteBirthday }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onAddBirthday, onDeleteBirthday }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -3986,18 +4054,7 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
               📊 Analyse
             </button>
           )}
-          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
-            <div className="pr-3">
-              <div className="text-sm font-medium text-ink">⏰ Wecker übertragen</div>
-              <div className="text-xs text-inkDim mt-1 leading-relaxed">
-                Zeigt im Tagesblick bei Aufgaben, Terminen und Fristen mit Uhrzeit einen Knopf, um direkt einen Wecker in der Wecker-App zu stellen (Android).
-              </div>
-            </div>
-            <button onClick={onToggleAlarm}
-              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.alarmEnabled ? 'bg-gold' : 'bg-border'}`}>
-              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.alarmEnabled ? 'left-5' : 'left-0.5'}`}></span>
-            </button>
-          </div>
+
         </div>
       )}
 
@@ -4230,39 +4287,32 @@ function App() {
   );
 }
 
-function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, alarmEnabled, onComplete }) {
+function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onComplete }) {
   const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
   const done = dayProgress[quest.id] === 'komplett';
   const failed = !done && deadline.date < todayBerlin();
+  const days = daysUntil(deadline.date);
+  const urgent = days <= 1;
+  const label = deadlineLabel(deadline.date);
   return (
     <div className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
-      done ? 'border-heal/40 bg-heal/5 opacity-60' :
+      done   ? 'border-heal/40 bg-heal/5 opacity-60' :
       failed ? 'border-border bg-surface opacity-50' :
-      'border-hp/50 bg-hp/5'
+      urgent ? 'border-hp/60 bg-hp/5' :
+               'border-orange/40 bg-orange/5'
     }`}>
       <span className="text-lg shrink-0">{failed ? '❌' : quest.icon}</span>
       <div className="flex-1 min-w-0">
         <div className={`text-sm truncate ${(done || failed) ? 'line-through text-inkDim' : 'text-ink'}`}>{quest.title}</div>
-        <div className={`text-[10px] ${failed ? 'text-inkDim' : 'text-hp'}`}>
-          {failed ? 'Frist verpasst' : `🔒 Frist${(!deadline.allDay && deadline.time) ? ` · ${deadline.time}` : ''}`}
+        <div className={`text-[10px] font-bold ${failed ? 'text-inkDim' : urgent ? 'text-hp' : 'text-orange'}`}>
+          {failed ? 'Frist verpasst' : `🔒 ${label}${(!deadline.allDay && deadline.time) ? ` · ${deadline.time}` : ''}`}
         </div>
       </div>
       {!done && !failed && (
-        <div className="flex items-center gap-1.5 shrink-0">
-          {!deadline.allDay && deadline.time && alarmEnabled && (() => {
-            return (
-              <button onClick={() => openAlarm('Frist: ' + quest.title, deadline.time)}
-                title="Wecker stellen"
-                className="w-8 h-8 rounded-lg border border-border bg-bgElevated text-inkDim text-sm flex items-center justify-center active:scale-95">
-                ⏰
-              </button>
-            );
-          })()}
-          <button onClick={onComplete}
-            className="w-8 h-8 rounded-lg border border-heal/50 bg-heal/10 text-heal text-sm flex items-center justify-center active:scale-95">
-            ✓
-          </button>
-        </div>
+        <button onClick={onComplete}
+          className="shrink-0 border border-heal/50 bg-heal/10 text-heal text-xs font-semibold rounded-lg px-2.5 py-2 active:scale-95">
+          Fertig
+        </button>
       )}
     </div>
   );
@@ -4459,12 +4509,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
-  function handleToggleAlarm() {
-    update(s => {
-      const p = s.profiles.find(p => p.id === activeProfile.id);
-      if (p) p.alarmEnabled = !p.alarmEnabled;
-    });
-  }
 
   function handleAddBirthday(data) {
     update(s => {
@@ -4768,24 +4812,38 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     b.day === cvDay && b.month === cvMonth && (!b.isPrivate || b.creatorId === activeProfile.id));
 
   const questDeadlinesForDay = Object.entries(activeProfile.questDeadlines || {})
-    .filter(([, d]) => d && d.date === calendarViewedDate)
+    .filter(([questId, d]) => {
+      if (!d || !d.date) return false;
+      const today = todayBerlin();
+      const progress = (activeProfile.questProgress[d.date] || {})[questId];
+      if (progress === 'komplett') return false; // abgehakt → nicht mehr zeigen
+      // Auf dem Frist-Tag selbst immer zeigen (auch vergangene → „verpasst")
+      if (d.date === calendarViewedDate) return true;
+      // Auf allen Tagen zwischen heute und Frist-Tag anzeigen
+      return calendarViewedDate >= today && calendarViewedDate < d.date;
+    })
     .map(([questId, d]) => ({ quest: state.quests.find(q => q.id === questId), deadline: d }))
     .filter(({ quest }) => quest)
     .sort((a, b) => {
       const today = todayBerlin();
-      const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
-      const aDone = dayProgress[a.quest.id] === 'komplett';
-      const bDone = dayProgress[b.quest.id] === 'komplett';
-      const aFailed = !aDone && a.deadline.date < today;
-      const bFailed = !bDone && b.deadline.date < today;
-      // Aktiv (weder done noch failed) → ganz oben
-      const aActive = !aDone && !aFailed;
-      const bActive = !bDone && !bFailed;
-      if (aActive !== bActive) return aActive ? -1 : 1;
-      // Verpasst vor Erledigt
-      if (aFailed !== bFailed) return aFailed ? -1 : 1;
-      return 0;
+      const aDone = false; // schon gefiltert
+      const aFailed = a.deadline.date < today;
+      const bFailed = b.deadline.date < today;
+      if (aFailed !== bFailed) return aFailed ? 1 : -1;
+      return a.deadline.date.localeCompare(b.deadline.date);
     });
+
+  // Alle kommenden Fristen — für den Heute-View immer sichtbar
+  const todayStr = todayBerlin();
+  const allUpcomingDeadlines = Object.entries(activeProfile.questDeadlines || {})
+    .filter(([questId, d]) => {
+      if (!d || !d.date || d.date < todayStr) return false;
+      const progress = (activeProfile.questProgress[d.date] || {})[questId];
+      return progress !== 'komplett';
+    })
+    .map(([questId, d]) => ({ quest: state.quests.find(q => q.id === questId), deadline: d }))
+    .filter(({ quest }) => quest)
+    .sort((a, b) => a.deadline.date.localeCompare(b.deadline.date));
 
   return (
     <>
@@ -4855,26 +4913,52 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             <SectionLabel>
               {calendarViewedDate === todayBerlin() ? `Tagesblick · Heute · ${formatShortDateWithYear(calendarViewedDate)}` : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
             </SectionLabel>
-            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 && birthdaysForDay.length === 0 && questDeadlinesForDay.length === 0 ? (
+
+            {calendarViewedDate === todayBerlin() && allUpcomingDeadlines.length > 0 && (
+              <div className="mb-3">
+                <DeadlineCarousel
+                  deadlines={allUpcomingDeadlines}
+                  onComplete={(questId) => handleQuestComplete(questId, 'komplett')}
+                />
+              </div>
+            )}
+
+            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 && birthdaysForDay.length === 0 && questDeadlinesForDay.filter(({ quest, deadline }) => { const dp = (activeProfile.questProgress || {})[calendarViewedDate] || {}; return dp[quest.id] !== 'komplett'; }).length === 0 ? (
               <div className="text-xs text-inkDim">
                 {calendarViewedDate === todayBerlin() ? 'Keine Aufgaben oder Termine heute.' : 'Keine Aufgaben oder Termine an diesem Tag.'}
               </div>
             ) : (
               <div className="space-y-2">
-                {questDeadlinesForDay.filter(({ quest, deadline }) => {
+                {calendarViewedDate !== todayBerlin() && (() => {
                   const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
-                  const done = dayProgress[quest.id] === 'komplett';
-                  const failed = !done && deadline.date < todayBerlin();
-                  return !done && !failed;
-                }).map(({ quest, deadline }) => (
-                  <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
-                    calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
-                    alarmEnabled={activeProfile.alarmEnabled} onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
-                ))}
+                  const active = questDeadlinesForDay.filter(({ quest, deadline }) => {
+                    const done = dayProgress[quest.id] === 'komplett';
+                    const failed = !done && deadline.date < todayBerlin();
+                    return !done && !failed;
+                  });
+                  const doneOrFailed = questDeadlinesForDay.filter(({ quest, deadline }) => {
+                    const done = dayProgress[quest.id] === 'komplett';
+                    const failed = !done && deadline.date < todayBerlin();
+                    return done || failed;
+                  });
+                  return (<>
+                    {active.length > 0 && (
+                      <DeadlineCarousel
+                        deadlines={active}
+                        onComplete={(questId) => handleQuestComplete(questId, 'komplett')}
+                      />
+                    )}
+                    {doneOrFailed.map(({ quest, deadline }) => (
+                      <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
+                        calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
+                        onComplete={() => handleQuestComplete(quest.id, 'komplett')} />
+                    ))}
+                  </>);
+                })()}
                 {dayAgendaForCalendarTab.map(entry => (
                   <AgendaItemRow key={entry.item.id + '_' + entry.scheduledDate} entry={entry} profiles={state.profiles}
                     onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
-                    actionable={calendarViewedDate <= todayBerlin()} showDate={false} showAlarm={activeProfile.alarmEnabled} />
+                    actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
                 ))}
                 {plannedItemsForDay.map(item => (
                   <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-gold/5 px-3 py-2.5">
@@ -4902,16 +4986,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                     </div>
                   );
                 })}
-                {questDeadlinesForDay.filter(({ quest, deadline }) => {
-                  const dayProgress = (activeProfile.questProgress || {})[calendarViewedDate] || {};
-                  const done = dayProgress[quest.id] === 'komplett';
-                  const failed = !done && deadline.date < todayBerlin();
-                  return done || failed;
-                }).map(({ quest, deadline }) => (
-                  <DeadlineRow key={quest.id} quest={quest} deadline={deadline}
-                    calendarViewedDate={calendarViewedDate} activeProfile={activeProfile}
-                    alarmEnabled={activeProfile.alarmEnabled} onComplete={() => handleQuestComplete(quest.id, 'komplett', calendarViewedDate)} />
-                ))}
               </div>
             )}
             <UpcomingAgendaList entries={upcomingAgendaForCalendarTab} profiles={state.profiles}
@@ -4971,7 +5045,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
           onToggleSportTracking={handleToggleSportTracking}
-          onToggleAlarm={handleToggleAlarm}
           onAddBirthday={handleAddBirthday}
           onDeleteBirthday={handleDeleteBirthday}
         />
