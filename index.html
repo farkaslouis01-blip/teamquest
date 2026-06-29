@@ -520,6 +520,14 @@ function freshProfile(overrides) {
     sportLog: {},
     questDeadlines: {},
     alarmEnabled: false,
+    freizeitEnabled: false,
+    freizeitTimer: {
+      running: false,
+      startedAt: null,      // Unix ms — Hintergrund-Timer
+      pendingMinutes: 0,    // aufgelaufene Minuten (0–59.99), werden nicht verworfen
+      log: [],              // [{ date, totalMinutes, entries:[{category,minutes}] }]
+      customCategories: [], // eigene Kategorien
+    },
   }, overrides || {});
 }
 
@@ -2115,19 +2123,6 @@ function ProfileEditor({ profile, isNew, onSave, onCancel }) {
             ))}
           </div>
         </div>
-        <div>
-          <SectionLabel>Klasse</SectionLabel>
-          <div className="grid grid-cols-3 gap-2">
-            {Object.values(CLASSES).map(c => (
-              <button key={c.key} onClick={() => setClassKey(c.key)}
-                className={`rounded-xl border-2 py-3 flex flex-col items-center gap-1 ${classKey === c.key ? 'border-gold bg-gold/10' : 'border-border bg-surface'}`}>
-                <span className="text-2xl">{c.icon}</span>
-                <span className="text-xs">{c.name}</span>
-                <span className="text-[10px] text-inkDim font-stat">{c.teamHp} Team-HP</span>
-              </button>
-            ))}
-          </div>
-        </div>
         <button
           disabled={!canSave}
           onClick={() => onSave({ name: name.trim(), icon, color, classKey })}
@@ -2656,6 +2651,355 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
         )}
       </div>
     </Modal>
+  );
+}
+
+const FREIZEIT_CATS = ['YouTube', 'Film/Serie', 'Musik/Podcast', 'Gaming'];
+
+function CategoryDropdown({ value, categories, customCats, onChange, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const [confirmCat, setConfirmCat] = useState(null);
+
+  return (
+    <div className="relative flex-1">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink text-left flex items-center justify-between">
+        <span>{value}</span>
+        <span className="text-inkDim text-xs ml-2">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-bgElevated border border-border rounded-xl overflow-hidden shadow-xl">
+          {categories.map(cat => {
+            const isCustom = customCats.includes(cat);
+            return (
+              <div key={cat} className={`flex items-center ${value === cat ? 'bg-gold/10' : 'hover:bg-surface'}`}>
+                <button type="button" onClick={() => { onChange(cat); setOpen(false); }}
+                  className="flex-1 px-3 py-2.5 text-sm text-left text-ink">
+                  {cat}
+                </button>
+                {isCustom && (
+                  <button type="button" onClick={() => setConfirmCat(cat)}
+                    className="px-3 py-2.5 text-inkDim text-base">🗑</button>
+                )}
+              </div>
+            );
+          })}
+          <div className="border-t border-border">
+            <button type="button" onClick={() => { onChange('__new__'); setOpen(false); }}
+              className="w-full px-3 py-2.5 text-sm text-inkDim text-left">
+              ➕ Neue Kategorie…
+            </button>
+          </div>
+        </div>
+      )}
+      {confirmCat && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-[60] bg-bgElevated border border-hp/50 rounded-xl p-3 shadow-xl space-y-2">
+          <div className="text-sm text-ink">„{confirmCat}" löschen?</div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setConfirmCat(null)}
+              className="flex-1 bg-surface border border-border rounded-lg py-1.5 text-xs text-inkDim">
+              Abbrechen
+            </button>
+            <button type="button" onClick={() => { onDelete(confirmCat); setConfirmCat(null); setOpen(false); }}
+              className="flex-1 bg-hp text-ink rounded-lg py-1.5 text-xs font-semibold">
+              Löschen
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function FreizeitStopModal({ sessionMinutes, hoursDeducted, initialCustomCategories, onConfirm }) {
+  const [customCats, setCustomCats] = useState(initialCustomCategories || []);
+  const allCategories = [...FREIZEIT_CATS, ...customCats].sort((a, b) => a.localeCompare(b));
+  const totalMins = Math.max(1, Math.round(sessionMinutes));
+  const [entries, setEntries] = useState([{ category: allCategories[0], minutes: null }]);
+  // inline new-category state per entry index
+  const [addingFor, setAddingFor] = useState(null);
+  const [newCatInput, setNewCatInput] = useState('');
+
+  const allocatedExcludingLast = entries.slice(0, -1).reduce((s, e) => s + (Number(e.minutes) || 0), 0);
+  const remaining = Math.max(0, totalMins - allocatedExcludingLast);
+
+  function setEntry(i, patch) {
+    setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, ...patch } : e));
+  }
+
+  function handleCatChange(i, val) {
+    if (val === '__new__') { setAddingFor(i); setNewCatInput(''); }
+    else setEntry(i, { category: val });
+  }
+
+  function confirmNewCat(i) {
+    const name = newCatInput.trim();
+    if (!name) return;
+    setCustomCats(prev => prev.includes(name) ? prev : [...prev, name]);
+    setEntry(i, { category: name });
+    setAddingFor(null);
+    setNewCatInput('');
+  }
+
+  function addEntry() {
+    if (allocatedExcludingLast >= totalMins) return;
+    setEntries(prev => [...prev, { category: allCategories[0], minutes: null }]);
+  }
+
+  function removeEntry(i) {
+    if (entries.length === 1) return;
+    setEntries(prev => prev.filter((_, idx) => idx !== i));
+  }
+
+  const finalEntries = entries.map((e, i) =>
+    i === entries.length - 1 ? { ...e, minutes: remaining } : { ...e, minutes: Number(e.minutes) || 0 }
+  );
+
+  return (
+    <div className="fixed inset-0 z-[300] flex justify-center bg-black/30">
+    <div className="w-full max-w-md bg-bg flex flex-col overflow-hidden">
+      <div className="px-5 pt-10 pb-4 border-b border-border">
+        <h2 className="font-display font-bold text-gold text-xl">Wie hast du die Zeit genutzt?</h2>
+        <p className="text-sm text-inkDim mt-1">
+          {Math.floor(sessionMinutes)} Min getrackt
+          {hoursDeducted > 0 ? ` · ${hoursDeducted} G abgebucht` : ' · noch keine volle Stunde'}
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        {entries.map((e, i) => {
+          const isLast = i === entries.length - 1;
+          const maxMins = totalMins - entries.slice(0, i).reduce((s, x) => s + (Number(x.minutes) || 0), 0) - (isLast ? 0 : 1);
+          const cats = [...FREIZEIT_CATS, ...customCats].sort((a, b) => a.localeCompare(b));
+          return (
+            <div key={i} className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                {addingFor === i ? (
+                  <div className="flex gap-2 flex-1">
+                    <input autoFocus value={newCatInput} onChange={ev => setNewCatInput(ev.target.value)}
+                      onKeyDown={ev => { if (ev.key === 'Enter') confirmNewCat(i); }}
+                      placeholder="Kategorie-Name…"
+                      className="flex-1 bg-surface border border-gold/50 rounded-xl px-3 py-2.5 text-sm text-ink" />
+                    <button onClick={() => confirmNewCat(i)}
+                      className="bg-gold text-bg text-sm font-semibold rounded-xl px-3 py-2 active:scale-95">OK</button>
+                    <button onClick={() => setAddingFor(null)} className="text-inkDim px-2">✕</button>
+                  </div>
+                ) : (
+                  <CategoryDropdown
+                    value={e.category}
+                    categories={cats}
+                    customCats={customCats}
+                    onChange={val => handleCatChange(i, val)}
+                    onDelete={cat => {
+                      setCustomCats(prev => prev.filter(c => c !== cat));
+                      setEntries(prev => prev.map(e => e.category === cat
+                        ? { ...e, category: FREIZEIT_CATS[0] } : e));
+                    }}
+                  />
+                )}
+                {isLast ? (
+                  <div className="w-20 bg-surface border border-gold/40 rounded-xl px-3 py-2.5 text-sm font-stat text-gold text-center shrink-0">
+                    {remaining} Min
+                  </div>
+                ) : (
+                  <select value={e.minutes ?? ''} onChange={ev => setEntry(i, { minutes: Number(ev.target.value) })}
+                    className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-sm font-stat text-ink text-center shrink-0">
+                    <option value="">–</option>
+                    {Array.from({ length: maxMins }, (_, n) => n + 1).map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                )}
+                {entries.length > 1 && (
+                  <button onClick={() => removeEntry(i)} className="text-inkDim text-lg px-1 shrink-0">✕</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {remaining > 1 && (
+          <button onClick={addEntry}
+            className="w-full border border-dashed border-border rounded-xl py-2.5 text-sm text-inkDim active:scale-[0.99]">
+            + Weitere Kategorie
+          </button>
+        )}
+      </div>
+      <div className="px-5 pb-8 pt-3 border-t border-border">
+        <button onClick={() => onConfirm(finalEntries, customCats)}
+          className="w-full bg-gold text-bg font-semibold rounded-xl py-3 text-base active:scale-[0.98]">
+          Speichern
+        </button>
+      </div>
+    </div>
+    </div>
+  );
+}
+
+/* ---- Timer Vollbild ---- */
+function FreizeitTimerScreen({ profile, onStart, onStop, onDeductGold, onClose }) {
+  const freizeit = profile.freizeitTimer || {};
+  const [tick, setTick] = useState(0);
+  const [showStop, setShowStop] = useState(false);
+  const lastHourRef = useRef(null);
+  const running = freizeit.running;
+
+  useEffect(() => {
+    if (!running) return;
+    const iv = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, [running]);
+
+  const sessionMs = running && freizeit.startedAt ? Date.now() - freizeit.startedAt : 0;
+  const totalMinutes = (freizeit.pendingMinutes || 0) + sessionMs / 60000;
+  const minutesInHour = totalMinutes % 60;
+  const displayMin = Math.floor(minutesInHour);
+  const displaySec = Math.floor((minutesInHour % 1) * 60);
+
+  useEffect(() => {
+    if (!running) return;
+    const hoursNow = Math.floor(totalMinutes / 60);
+    if (lastHourRef.current === null) { lastHourRef.current = hoursNow; return; }
+    if (hoursNow > lastHourRef.current) {
+      onDeductGold(hoursNow - lastHourRef.current);
+      lastHourRef.current = hoursNow;
+    }
+  }, [Math.floor(totalMinutes / 60)]);
+
+  const R = 110;
+  const STROKE = 14;
+  const C = 2 * Math.PI * R;
+  const fill = running ? minutesInHour / 60 : (freizeit.pendingMinutes || 0) % 60 / 60;
+  const dashOffset = C * (1 - fill);
+
+  const pendingDisplay = Math.floor((freizeit.pendingMinutes || 0) % 60);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex justify-center bg-black/30">
+      <div className="relative w-full max-w-md bg-bg flex flex-col items-center justify-between py-16 px-6 overflow-y-auto">
+      {!running && (
+        <button onClick={onClose} className="self-start text-inkDim text-sm flex items-center gap-1 active:scale-95">
+          ✕ Schließen
+        </button>
+      )}
+      {running && <div style={{ height: 24 }} />}
+
+      <div className="text-center">
+        <div className="font-display text-gold text-2xl font-bold">Auszeit</div>
+        <div className="text-inkDim text-sm mt-1 flex items-center justify-center gap-2">
+          <span className="font-stat text-gold font-bold">{profile.gold} <span className="font-display">G</span></span>
+          <span className="text-border">·</span>
+          <span>1h = 1 <span className="font-display text-gold">G</span></span>
+        </div>
+      </div>
+
+      <div className="relative" onClick={running ? () => setShowStop(true) : onStart} style={{ cursor: 'pointer' }}>
+        <svg width="260" height="260" viewBox="0 0 260 260">
+          <circle cx="130" cy="130" r={R} fill="none" stroke="#1e1e2e" strokeWidth={STROKE} />
+          <circle cx="130" cy="130" r={R} fill="none" stroke="white" strokeWidth={STROKE}
+            strokeLinecap="round"
+            strokeDasharray={C}
+            strokeDashoffset={dashOffset}
+            transform="rotate(-90 130 130)"
+            style={{ transition: running ? 'stroke-dashoffset 0.9s linear' : 'none' }} />
+          {/* Klickbare Mitte */}
+          <circle cx="130" cy="130" r="80" fill="transparent" />
+          {running ? (<>
+            <text x="130" y="118" textAnchor="middle" fill="white" fontSize="44" fontWeight="bold" fontFamily="monospace">
+              {String(displayMin).padStart(2,'0')}:{String(displaySec).padStart(2,'0')}
+            </text>
+            <text x="130" y="152" textAnchor="middle" fill="#666" fontSize="13">Min in dieser Stunde</text>
+            <text x="130" y="172" textAnchor="middle" fill="#555" fontSize="12">{totalMinutes.toFixed(0)} Min gesamt</text>
+          </>) : (<>
+            <text x="130" y="118" textAnchor="middle" fill="white" fontSize="44" fontWeight="bold" fontFamily="monospace">
+              {String(pendingDisplay).padStart(2,'0')}:00
+            </text>
+            <text x="130" y="152" textAnchor="middle" fill="#888" fontSize="15">▶</text>
+            <text x="130" y="172" textAnchor="middle" fill="#666" fontSize="13">antippen zum Starten</text>
+          </>)}
+        </svg>
+      </div>
+
+      <div style={{ height: 56 }} />
+
+      {showStop && (
+        <FreizeitStopModal
+          sessionMinutes={sessionMs / 60000}
+          hoursDeducted={Math.floor(totalMinutes / 60) - Math.floor((freizeit.pendingMinutes || 0) / 60)}
+          initialCustomCategories={freizeit.customCategories || []}
+          onConfirm={(entries, customCats) => onStop(entries, customCats)}
+        />
+      )}
+    </div>
+    </div>
+  );
+}
+
+/* ---- Analyse ---- */
+function FreizeitAnalysis({ log, onClose }) {
+  const [range, setRange] = useState(7);
+
+  const cutoff = range === 0 ? null : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - range);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const filtered = (log || []).filter(s => !cutoff || s.date >= cutoff);
+
+  const totals = {};
+  filtered.forEach(session => {
+    (session.entries || []).forEach(e => {
+      totals[e.category] = (totals[e.category] || 0) + (e.minutes || 0);
+    });
+  });
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  const max = sorted[0]?.[1] || 1;
+  const totalMins = sorted.reduce((s, [, m]) => s + m, 0);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 px-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-4"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <span className="font-display font-bold text-gold text-lg">Freizeit-Analyse</span>
+          <button onClick={onClose} className="text-inkDim text-xl px-1">✕</button>
+        </div>
+
+        {/* Zeitraum-Filter */}
+        <div className="flex gap-2">
+          {[{ label: '7 Tage', val: 7 }, { label: '30 Tage', val: 30 }, { label: 'Max', val: 0 }].map(({ label, val }) => (
+            <button key={val} onClick={() => setRange(val)}
+              className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition-colors ${
+                range === val ? 'bg-gold/20 border-gold/60 text-gold' : 'bg-surface border-border text-inkDim'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3 max-h-64 overflow-y-auto">
+          {sorted.length === 0
+            ? <p className="text-sm text-inkDim">Keine Daten für diesen Zeitraum.</p>
+            : sorted.map(([cat, mins]) => (
+              <div key={cat}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-ink">{cat}</span>
+                  <span className="font-stat text-inkDim">{Math.floor(mins / 60)}h {mins % 60}m</span>
+                </div>
+                <div className="h-2 bg-surface rounded-full overflow-hidden">
+                  <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${(mins / max) * 100}%` }} />
+                </div>
+              </div>
+            ))
+          }
+        </div>
+
+        {totalMins > 0 && (
+          <p className="text-xs text-inkDim border-t border-border pt-3">
+            Gesamt: {Math.floor(totalMins / 60)}h {totalMins % 60}m
+            {range > 0 ? ` in den letzten ${range} Tagen` : ''}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -3972,7 +4316,7 @@ function BirthdaysSection({ birthdays, activeProfileId, onAdd, onDelete }) {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onAddBirthday, onDeleteBirthday }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleFreizeit, onShowFreizeitAnalysis, onAddBirthday, onDeleteBirthday }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -3982,7 +4326,6 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
     { key: 'bibliothek', label: 'Bibliothek' },
     { key: 'geburtstage', label: 'Geburtstage' },
     { key: 'anzeige', label: 'Anzeige' },
-    { key: 'extras', label: 'Extras' },
     { key: 'sync', label: 'Sync' },
     { key: 'daten', label: 'Daten' },
   ];
@@ -4021,6 +4364,42 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
               Profil wechseln
             </button>
           )}
+          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-ink">⏱️ Freizeit-Timer</div>
+              <div className="text-xs text-inkDim mt-1 leading-relaxed">
+                Trackt deine Auszeit und bucht automatisch 1 G pro Stunde ab. Minuten werden über Tage angespart.
+              </div>
+            </div>
+            <button onClick={onToggleFreizeit}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.freizeitEnabled ? 'bg-gold' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.freizeitEnabled ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+          {profile.freizeitEnabled && (
+            <button onClick={onShowFreizeitAnalysis}
+              className="w-full border border-dashed border-gold/50 rounded-2xl py-3 text-sm text-gold active:scale-[0.99]">
+              📊 Freizeit-Analyse
+            </button>
+          )}
+          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-ink">🏋️ Sport-Tracking</div>
+              <div className="text-xs text-inkDim mt-1 leading-relaxed">
+                Fügt im Kalender-Tab einen Knopf hinzu, um täglich Kalorien und Protein einzutragen.
+              </div>
+            </div>
+            <button onClick={onToggleSportTracking}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.sportTrackingEnabled ? 'bg-sport' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.sportTrackingEnabled ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+          {profile.sportTrackingEnabled && (
+            <button onClick={() => setShowSportAnalysis(true)}
+              className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
+              📊 Sport-Analyse
+            </button>
+          )}
         </div>
       )}
 
@@ -4033,30 +4412,6 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
       {section === 'anzeige' && (
         <div className="space-y-4">
           <UiScaleSetting />
-        </div>
-      )}
-
-      {section === 'extras' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
-            <div className="pr-3">
-              <div className="text-sm font-medium text-ink">🏋️ Sport-Tracking</div>
-              <div className="text-xs text-inkDim mt-1 leading-relaxed">
-                Fügt im Kalender-Tab einen Knopf hinzu, um täglich Kalorien und Protein einzutragen. Gilt nur für dein Profil — der Partner sieht den Knopf nicht, außer er aktiviert es selbst.
-              </div>
-            </div>
-            <button onClick={onToggleSportTracking}
-              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.sportTrackingEnabled ? 'bg-sport' : 'bg-border'}`}>
-              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.sportTrackingEnabled ? 'left-5' : 'left-0.5'}`}></span>
-            </button>
-          </div>
-          {profile.sportTrackingEnabled && (
-            <button onClick={() => setShowSportAnalysis(true)}
-              className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
-              📊 Analyse
-            </button>
-          )}
-
         </div>
       )}
 
@@ -4121,29 +4476,48 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
    12. BOTTOM NAVIGATION
    ============================================================ */
 
-function BottomNav({ active, setActive, badges }) {
+function BottomNav({ active, setActive, badges, freizeitEnabled, timerRunning, onTimerOpen }) {
   const b = badges || {};
-  const tabs = [
+  const left = [
     { key: 'kalender', label: 'Kalender', icon: '📅', badge: b.kalender },
     { key: 'quests', label: 'Quests', icon: '📜' },
     { key: 'kampf', label: 'Kampf', icon: '⚔️' },
+  ];
+  const right = [
     { key: 'shop', label: 'Shop', icon: '🛒', badge: b.shop },
     { key: 'inventar', label: 'Inventar', icon: '🎒' },
     { key: 'mehr', label: 'Mehr', icon: '☰' },
   ];
+  const TabBtn = ({ t }) => (
+    <button key={t.key} onClick={() => setActive(t.key)}
+      className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 relative ${active === t.key ? 'text-gold' : 'text-inkDim'}`}>
+      <span className="text-lg">{t.icon}</span>
+      <span className="text-[9px] font-medium leading-tight">{t.label}</span>
+      {t.badge > 0 && (
+        <span className="absolute top-1 right-[18%] bg-hp text-ink text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{t.badge}</span>
+      )}
+    </button>
+  );
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 bg-bgElevated border-t border-border safe-bottom">
-      <div className="max-w-md mx-auto grid grid-cols-6">
-        {tabs.map(t => (
-          <button key={t.key} onClick={() => setActive(t.key)}
-            className={`flex flex-col items-center gap-0.5 py-2.5 relative ${active === t.key ? 'text-gold' : 'text-inkDim'}`}>
-            <span className="text-lg">{t.icon}</span>
-            <span className="text-[9px] font-medium leading-tight">{t.label}</span>
-            {t.badge > 0 && (
-              <span className="absolute top-1 right-[18%] bg-hp text-ink text-[9px] rounded-full w-4 h-4 flex items-center justify-center">{t.badge}</span>
-            )}
-          </button>
-        ))}
+      <div className="max-w-md mx-auto flex items-end">
+        {left.map(t => <TabBtn key={t.key} t={t} />)}
+        {freizeitEnabled && (
+          <div className="flex flex-col items-center justify-end pb-1 px-1">
+            <button onClick={onTimerOpen}
+              className={`w-14 h-14 rounded-full flex flex-col items-center justify-center gap-0 -translate-y-2 border-2 ${
+                timerRunning
+                  ? 'bg-gold border-gold text-bg shadow-lg shadow-gold/30'
+                  : 'bg-bgElevated border-gold/60 text-gold'
+              }`}>
+              <span className="text-xl leading-none">⏱</span>
+              <span className="text-[8px] font-medium leading-none mt-0.5">
+                {timerRunning ? 'Läuft' : 'Auszeit'}
+              </span>
+            </button>
+          </div>
+        )}
+        {right.map(t => <TabBtn key={t.key} t={t} />)}
       </div>
     </div>
   );
@@ -4332,7 +4706,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [calendarModal, setCalendarModal] = useState(null);
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(null);
   const [sportModalDate, setSportModalDate] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState(null); // { message } — nur für Anzeige
+  const [confirmDialog, setConfirmDialog] = useState(null);
+  const [showFreizeitAnalysis, setShowFreizeitAnalysis] = useState(false);
+  const [freizeitScreenOpen, setFreizeitScreenOpen] = useState(false);
   const confirmCallbackRef = useRef(null); // hält den onConfirm-Callback stabil
 
   // _showConfirm global registrieren — DeleteButton ruft das auf
@@ -4509,6 +4885,57 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       const p = s.profiles.find(p => p.id === activeProfile.id);
       if (p) p.sportTrackingEnabled = !p.sportTrackingEnabled;
     });
+  }
+
+  function handleToggleFreizeit() {
+    update(s => {
+      const p = s.profiles.find(p => p.id === activeProfile.id);
+      if (p) p.freizeitEnabled = !p.freizeitEnabled;
+    });
+  }
+
+  // Freizeit-Timer starten/stoppen
+  function handleStartFreizeit() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p) return;
+      if (!p.freizeitTimer) p.freizeitTimer = { running: false, startedAt: null, pendingMinutes: 0, log: [], customCategories: [] };
+      p.freizeitTimer.running = true;
+      p.freizeitTimer.startedAt = Date.now();
+    });
+  }
+
+  function handleStopFreizeit(entries, customCats) {
+    const freizeit = activeProfile.freizeitTimer || {};
+    const sessionMs = freizeit.startedAt ? Date.now() - freizeit.startedAt : 0;
+    const sessionMinutes = sessionMs / 60000;
+    const totalMinutes = (freizeit.pendingMinutes || 0) + sessionMinutes;
+    const hoursToDeduct = Math.floor(totalMinutes / 60);
+    const newPending = totalMinutes % 60;
+
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p) return;
+      if (!p.freizeitTimer) p.freizeitTimer = { running: false, startedAt: null, pendingMinutes: 0, log: [], customCategories: [] };
+      p.freizeitTimer.running = false;
+      p.freizeitTimer.startedAt = null;
+      p.freizeitTimer.pendingMinutes = newPending;
+      if (customCats) p.freizeitTimer.customCategories = customCats;
+      if (entries && entries.length > 0) {
+        if (!p.freizeitTimer.log) p.freizeitTimer.log = [];
+        p.freizeitTimer.log.push({ date: todayBerlin(), totalMinutes: Math.round(sessionMinutes), entries });
+      }
+      if (hoursToDeduct > 0) p.gold = Math.max(0, (p.gold || 0) - hoursToDeduct);
+    });
+    if (hoursToDeduct > 0) pushToast(`${hoursToDeduct} G für Auszeit abgebucht.`, 'info');
+  }
+
+  function handleFreizeitDeductGold(hours) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (p) p.gold = Math.max(0, (p.gold || 0) - hours);
+    });
+    pushToast(`${hours} G für Auszeit abgebucht.`, 'info');
   }
 
 
@@ -4859,21 +5286,33 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     <div className="max-w-md mx-auto min-h-screen relative">
       <ToastStack toasts={toasts} />
 
+      {/* Freizeit-Timer Vollbild */}
+      {activeProfile.freizeitEnabled && (freizeitScreenOpen || activeProfile.freizeitTimer?.running) && (
+        <FreizeitTimerScreen
+          profile={activeProfile}
+          onStart={() => { handleStartFreizeit(); }}
+          onStop={(entries, newCat) => { handleStopFreizeit(entries, newCat); setFreizeitScreenOpen(false); }}
+          onDeductGold={handleFreizeitDeductGold}
+          onClose={() => setFreizeitScreenOpen(false)}
+        />
+      )}
+
       <div className="sticky top-0 z-30 bg-bgElevated/95 backdrop-blur border-b border-border px-4 py-3 flex items-center justify-between relative">
         <div className="font-display font-bold text-gold text-base tracking-wide flex items-center gap-1.5">
           TeamQuest
           <ConnectionDot status={connStatus} />
         </div>
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-          <span className="text-lg">💰</span>
-          <span className="font-stat text-xl text-gold font-bold leading-none">{activeProfile.gold}</span>
+          <span className="font-stat text-xl text-gold font-bold leading-none">{activeProfile.gold} <span className="font-display text-lg">G</span></span>
         </div>
-        <button onClick={() => setActiveProfileId(null)} className="flex items-center gap-2" aria-label="Profil wechseln">
-          <div className="text-xs text-inkDim font-stat flex items-center gap-1">
-            <span className="text-gold font-semibold">Lvl {activeProfile.level}</span>
-          </div>
-          <ProfileAvatar profile={activeProfile} size={32} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setActiveProfileId(null)} className="flex items-center gap-2" aria-label="Profil wechseln">
+            <div className="text-xs text-inkDim font-stat flex items-center gap-1">
+              <span className="text-gold font-semibold">Lvl {activeProfile.level}</span>
+            </div>
+            <ProfileAvatar profile={activeProfile} size={32} />
+          </button>
+        </div>
       </div>
 
       {activeTab === 'quests' && (
@@ -5054,12 +5493,18 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
           onToggleSportTracking={handleToggleSportTracking}
+          onToggleFreizeit={handleToggleFreizeit}
+          onShowFreizeitAnalysis={() => setShowFreizeitAnalysis(true)}
           onAddBirthday={handleAddBirthday}
           onDeleteBirthday={handleDeleteBirthday}
         />
       )}
 
-      <BottomNav active={activeTab} setActive={setActiveTab} badges={{ shop: myConfirmCount, kalender: calendarBadgeCount }} />
+      <BottomNav active={activeTab} setActive={setActiveTab}
+        badges={{ shop: myConfirmCount, kalender: calendarBadgeCount }}
+        freizeitEnabled={activeProfile.freizeitEnabled}
+        timerRunning={!!activeProfile.freizeitTimer?.running}
+        onTimerOpen={() => setFreizeitScreenOpen(true)} />
 
       {editingProfile && !editingProfile.isNew && (
         <ProfileEditor
@@ -5076,6 +5521,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         />
       )}
     </div>
+    {showFreizeitAnalysis && (
+      <FreizeitAnalysis
+        log={activeProfile.freizeitTimer?.log || []}
+        onClose={() => setShowFreizeitAnalysis(false)}
+      />
+    )}
     {confirmDialog && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 px-4"
         onPointerDown={() => setConfirmDialog(null)}>
