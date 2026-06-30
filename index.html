@@ -3217,9 +3217,10 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
             const label = deadlineLabel(activeDeadline.date);
             const urgent = daysUntil(activeDeadline.date) <= 1;
             return (
-              <span className={`text-[10px] font-stat font-bold ${urgent ? 'text-hp' : 'text-orange'}`}>
+              <button onClick={() => setShowDeadline(true)}
+                className={`text-[10px] font-stat font-bold underline decoration-dotted underline-offset-2 active:scale-95 ${urgent ? 'text-hp' : 'text-orange'}`}>
                 📅 {label}{(!activeDeadline.allDay && activeDeadline.time) ? ` · ${activeDeadline.time}` : ''}
-              </span>
+              </button>
             );
           })()}
         </div>
