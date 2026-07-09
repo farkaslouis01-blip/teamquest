@@ -240,10 +240,10 @@ const CLASSES = {
 };
 
 const BOSS_TIERS = [
-  { name: 'Wegelagerer', emoji: '👹', hp: 100, gold: 20 },
-  { name: 'Wildschwein-Alpha', emoji: '🐗', hp: 160, gold: 40 },
-  { name: 'Drachenwache', emoji: '🐉', hp: 240, gold: 70 },
-  { name: 'Schattenfürst', emoji: '💀', hp: 400, gold: 120 },
+  { name: 'Wegelagerer', emoji: '👹', hp: 100, gold: 10 },
+  { name: 'Wildschwein-Alpha', emoji: '🐗', hp: 160, gold: 16 },
+  { name: 'Drachenwache', emoji: '🐉', hp: 240, gold: 25 },
+  { name: 'Schattenfürst', emoji: '💀', hp: 400, gold: 50 },
 ];
 const COUNTER_DAMAGE = [10, 16, 24, 40];
 
@@ -270,6 +270,17 @@ const STREAK_FREEZE_COST = 8;
 const STREAK_FREEZE_CAP = 2;
 const STREAK_REPAIR_COST = 10;
 const DOUBLE_XP_COST = 6;
+
+// Streak-Meilensteine: 10, 22, 36, 52, 70, ...
+// Zwischen den Meilensteinen: +12, +14, +16, ... (jeweils 2 mehr)
+// Formel für den n-ten Meilenstein (1-basiert): 10 + (n-1) * (10 + n)
+function streakMilestoneN(n) {
+  return 10 + (n - 1) * (10 + n);
+}
+// Nächster Meilenstein — abhängig davon wie viele Upgradepunkte aus Streaks schon verdient wurden
+function nextStreakUpgradeMilestone(pointsEarned) {
+  return streakMilestoneN((pointsEarned || 0) + 1);
+}
 
 const DEFAULT_QUEST_CATEGORIES = [
   'Haushalt', 'Sport & Bewegung', 'Zeichnen', 'Uni', 'Verwaltung & Kommunikation', 'Struktur & Vorbereitung'
@@ -545,6 +556,8 @@ function freshProfile(overrides) {
     streakFreezes: 0,             // Anzahl verfügbarer Streak-Freezes (max. STREAK_FREEZE_CAP)
     streakFreezeUsedDates: [],    // Tage, die per Freeze/Streak-retten geschützt wurden
     doubleXpDate: null,           // 'YYYY-MM-DD' — falls = heute, gilt 2x XP für den Rest des Tages
+    abilityUpgradePoints: 0,      // Punkte zum Verbessern von Abilities (aus Streak-Meilensteinen)
+    abilityUpgrades: {},          // { abilityId: bonusValue } — kumulierter Bonus pro Ability
   }, overrides || {});
 }
 
@@ -565,6 +578,7 @@ function initialState() {
       bleeds: [],           // [{ remaining, dmg }]
       actionsTodayDate: null,
       actionsTodayCount: 0,
+      maxTierDefeated: -1,  // höchster bisher besiegter Tier (-1 = noch keiner)
     },
     pendingConfirmations: [], // [{ id, category, itemId, title, cost, buyerId, partnerId, buyerPaid, partnerPaid }]
     log: [],                  // [{ id, ts, text }]
@@ -1121,13 +1135,25 @@ function dealBossDamage(state, amount) {
 function defeatBoss(state) {
   const stats = bossStatsForTier(state.combat.bossTier);
   state.profiles.forEach(p => { p.gold += stats.gold; });
-  addLog(state, `🏆 ${bossDisplayName(state.combat.bossTier)} besiegt! Jeder erhält ${stats.gold} Gold.`);
-  state.combat.bossTier += 1;
-  const next = bossStatsForTier(state.combat.bossTier);
+  addLog(state, `🏆 ${bossDisplayName(state.combat.bossTier)} besiegt! Jeder erhält ${stats.gold} G.`);
+
+  // Höchsten besiegten Tier aktualisieren
+  if (!state.combat.maxTierDefeated || state.combat.bossTier > state.combat.maxTierDefeated) {
+    state.combat.maxTierDefeated = state.combat.bossTier;
+  }
+
+  // Nächster Boss: zufällig aus allen bisher freigeschalteten Tiers.
+  // "Freigeschaltet" = alle Tiers bis zum ersten noch nie besiegten (= maxTierDefeated + 1, max. letzter Tier).
+  const maxAvailable = Math.min(state.combat.maxTierDefeated + 1, BOSS_TIERS.length - 1);
+  const nextTier = Math.floor(Math.random() * (maxAvailable + 1));
+  state.combat.bossTier = nextTier;
+
+  const next = bossStatsForTier(nextTier);
   state.combat.bossHp = next.hp;
   state.combat.teamHp = teamHpMax(state);
   state.combat.pendingShield = 0;
   state.combat.bleeds = [];
+  addLog(state, `⚔️ Nächster Gegner: ${next.emoji} ${next.name}!`);
 }
 
 // Schaden auf die Team-HP anwenden, inkl. "Boss heilt sich bei 0 HP"-Regel.
@@ -1194,61 +1220,67 @@ function useAbility(state, profileId, abilityId) {
   }
 
   let defeated = false;
+  const bonus = (profile.abilityUpgrades || {})[abilityId] || 0; // Upgrade-Bonus (aus Streak-Meilensteinen)
   switch (ability.kind) {
     case 'damage': {
-      const dmg = rollVariance(ability.value);
-      addLog(state, `⚔️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden.`);
+      const dmg = rollVariance(ability.value) + bonus;
+      addLog(state, `⚔️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden${bonus ? ` (+${bonus})` : ''}.`);
       defeated = dealBossDamage(state, dmg);
       break;
     }
     case 'damage_bleed': {
-      const dmg = rollVariance(ability.value);
-      addLog(state, `🩸 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden + Blutung.`);
+      const dmg = rollVariance(ability.value) + bonus;
+      addLog(state, `🩸 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden${bonus ? ` (+${bonus})` : ''} + Blutung.`);
       defeated = dealBossDamage(state, dmg);
       if (!defeated) state.combat.bleeds.push({ remaining: ability.bleedTicks, dmg: ability.bleedValue });
       break;
     }
     case 'shield': {
-      state.combat.pendingShield = Math.max(state.combat.pendingShield, ability.shieldValue);
-      addLog(state, `🛡️ ${profile.name} setzt ${ability.name} ein: nächster Gegenangriff -${ability.shieldValue}.`);
+      const shv = ability.shieldValue + bonus;
+      state.combat.pendingShield = Math.max(state.combat.pendingShield, shv);
+      addLog(state, `🛡️ ${profile.name} setzt ${ability.name} ein: nächster Gegenangriff -${shv}${bonus ? ` (+${bonus})` : ''}.`);
       break;
     }
     case 'damage_shield': {
-      const dmg = rollVariance(ability.value);
+      const dmg = rollVariance(ability.value) + bonus;
       state.combat.pendingShield = Math.max(state.combat.pendingShield, ability.shieldValue);
-      addLog(state, `❄️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden, nächster Gegenangriff -${ability.shieldValue}.`);
+      addLog(state, `❄️ ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden${bonus ? ` (+${bonus})` : ''}, nächster Gegenangriff -${ability.shieldValue}.`);
       defeated = dealBossDamage(state, dmg);
       break;
     }
     case 'damage_selfhurt': {
-      const dmg = rollVariance(ability.value);
-      addLog(state, `💢 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden, kostet ${ability.selfHurt} Team-HP.`);
+      const dmg = rollVariance(ability.value) + bonus;
+      addLog(state, `💢 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden${bonus ? ` (+${bonus})` : ''}, kostet ${ability.selfHurt} Team-HP.`);
       defeated = dealBossDamage(state, dmg);
       if (!defeated) dealTeamDamage(state, ability.selfHurt);
       break;
     }
     case 'heal': {
+      const healAmt = ability.value + bonus;
       const before = state.combat.teamHp;
-      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.value);
-      addLog(state, `✨ ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Team-HP.`);
+      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + healAmt);
+      addLog(state, `✨ ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Team-HP${bonus ? ` (+${bonus})` : ''}.`);
       break;
     }
     case 'damage_heal': {
-      const dmg = rollVariance(ability.value);
+      const dmg = rollVariance(ability.value) + bonus;
+      const healAmt = ability.healValue + bonus;
       const before = state.combat.teamHp;
-      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.healValue);
-      addLog(state, `🙏 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden + ${state.combat.teamHp - before} Heilung.`);
+      state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + healAmt);
+      addLog(state, `🙏 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden + ${state.combat.teamHp - before} Heilung${bonus ? ` (+${bonus} je)` : ''}.`);
       defeated = dealBossDamage(state, dmg);
       break;
     }
     case 'random_damage_heal': {
       if (Math.random() < 0.5) {
+        const healAmt = ability.value + bonus;
         const before = state.combat.teamHp;
-        state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + ability.value);
-        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Heilung.`);
+        state.combat.teamHp = Math.min(teamHpMax(state), state.combat.teamHp + healAmt);
+        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: +${state.combat.teamHp - before} Heilung${bonus ? ` (+${bonus})` : ''}.`);
       } else {
-        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: ${ability.value} Schaden.`);
-        defeated = dealBossDamage(state, ability.value);
+        const dmg = ability.value + bonus;
+        addLog(state, `🌟 ${profile.name} setzt ${ability.name} ein: ${dmg} Schaden${bonus ? ` (+${bonus})` : ''}.`);
+        defeated = dealBossDamage(state, dmg);
       }
       break;
     }
@@ -1338,6 +1370,20 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
   const delta = after - before;
 
   profile.questProgress[today][questId] = stage;
+
+  // Streak-Meilensteine prüfen: falls neue Streak einen Schwellenwert überschreitet → Upgradepoint.
+  // Mehrere auf einmal möglich (z.B. wenn Streak durch Retroaktivberechnung stark springt).
+  if (today === todayBerlin()) {
+    const newStreak = computeStreak(profile);
+    let milestonesGained = 0;
+    while (newStreak >= nextStreakUpgradeMilestone(profile.abilityUpgradePoints || 0)) {
+      profile.abilityUpgradePoints = (profile.abilityUpgradePoints || 0) + 1;
+      milestonesGained++;
+    }
+    if (milestonesGained > 0) {
+      addLog(state, `🔥 Streak-Meilenstein! +${milestonesGained} Ability-Upgrade-Punkt${milestonesGained > 1 ? 'e' : ''} (Streak: ${newStreak} Tage).`);
+    }
+  }
 
   if (!profile.questXpToday || profile.questXpToday.date !== today) {
     profile.questXpToday = { date: today, amount: 0 };
@@ -3440,7 +3486,70 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
    9. TAB: KAMPF
    ============================================================ */
 
-function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
+function AbilityUpgradeModal({ profile, onUpgrade, onClose }) {
+  const cls = getClass(profile);
+  const classColor = cls.id === 'krieger' ? '#c1543c' : cls.id === 'magier' ? '#7d70e0' : '#9fd6c4';
+  const points = profile.abilityUpgradePoints || 0;
+  const upgrades = profile.abilityUpgrades || {};
+  const abilities = unlockedAbilities(profile);
+  const nextMilestone = nextStreakUpgradeMilestone(points);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl pb-6 overflow-hidden max-h-[80vh] flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-border"
+          style={{ background: classColor + '15' }}>
+          <div>
+            <div className="font-display font-bold text-base text-ink">⬆️ Ability-Upgrades</div>
+            <div className="text-xs text-inkDim mt-0.5">
+              {points > 0
+                ? <span className="text-gold font-semibold">{points} Punkt{points > 1 ? 'e' : ''} verfügbar</span>
+                : `Nächster Punkt bei 🔥${nextMilestone} Streak-Tagen`}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-inkDim text-xl px-1">✕</button>
+        </div>
+        {/* Abilities */}
+        <div className="px-4 pt-4 space-y-2.5 max-h-96 overflow-y-auto">
+          {abilities.map(a => {
+            const bonus = upgrades[a.id] || 0;
+            const canUpgrade = points > 0;
+            return (
+              <div key={a.id} className="bg-surface border border-border rounded-xl overflow-hidden">
+                <div className="px-3.5 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-ink flex items-center gap-2">
+                      {a.name}
+                      {bonus > 0 && (
+                        <span className="text-[10px] font-bold text-heal bg-heal/10 border border-heal/30 rounded px-1.5 py-0.5">
+                          +{bonus} aktiv
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-inkDim mt-0.5">{a.desc}</div>
+                  </div>
+                </div>
+                {canUpgrade && (
+                  <button onClick={() => onUpgrade(a.id)}
+                    className="w-full border-t py-2 text-xs font-semibold text-center active:scale-[0.99] transition-all"
+                    style={{ borderColor: classColor + '40', background: classColor + '12', color: classColor }}>
+                    +2 aufwerten · 1 Punkt verwenden
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAbility }) {
+  const [showUpgrade, setShowUpgrade] = useState(false);
+
   if (profiles.length < 2) {
     return (
       <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">
@@ -3500,6 +3609,9 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
         const available = getAvailableActions(p);
         const cls = getClass(p);
         const classColor = cls.id === 'krieger' ? '#c1543c' : cls.id === 'magier' ? '#7d70e0' : '#9fd6c4';
+        const upgradePoints = p.abilityUpgradePoints || 0;
+        const upgrades = p.abilityUpgrades || {};
+        const nextMilestone = nextStreakUpgradeMilestone(upgradePoints);
         return (
           <div key={p.id} className="rounded-2xl border overflow-hidden bg-surface" style={{ borderColor: classColor + '40' }}>
             {/* Header mit Gradient */}
@@ -3512,36 +3624,54 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
                   <div className="text-[10px] text-inkDim">{cls.name} · Lvl {p.level}</div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="font-stat text-xl font-bold text-orange">{available}</div>
-                <div className="text-[9px] text-inkDim uppercase tracking-wide">Aktionen</div>
+              <div className="flex items-center gap-2.5">
+                {/* Upgrade-Button */}
+                <button onClick={() => setShowUpgrade(true)}
+                  className="relative w-8 h-8 rounded-lg flex items-center justify-center border active:scale-95 transition-all"
+                  style={{
+                    borderColor: upgradePoints > 0 ? classColor + '70' : '#473d57',
+                    background: upgradePoints > 0 ? classColor + '20' : 'transparent',
+                  }}>
+                  <span className="text-sm">⬆️</span>
+                  {upgradePoints > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-bg"
+                      style={{ background: classColor }}>
+                      {upgradePoints}
+                    </span>
+                  )}
+                </button>
+                <div className="text-right">
+                  <div className="font-stat text-xl font-bold text-orange">{available}</div>
+                  <div className="text-[9px] text-inkDim uppercase tracking-wide">Aktionen</div>
+                </div>
               </div>
             </div>
-            {/* Trennlinie in Klassenfarbe */}
             <div className="h-px" style={{ background: `linear-gradient(90deg, transparent, ${classColor}80, transparent)` }} />
-            {/* Ability-Buttons ohne Gradient */}
+            {/* Ability-Buttons */}
             <div className="px-3 py-3 space-y-2">
               {unlockedAbilities(p).map(a => {
                 const disabled = a.onCooldown || available <= 0;
+                const bonus = upgrades[a.id] || 0;
                 return (
-                  <button key={a.id} disabled={disabled} onClick={() => onUseAbility(p.id, a.id)}
-                    className={`w-full text-left rounded-xl border px-3.5 py-2.5 flex items-center justify-between gap-3 transition-all ${
-                      disabled ? 'border-border bg-bgElevated opacity-40' : 'border-border bg-bgElevated active:scale-[0.98]'
-                    }`}>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-semibold text-ink">
-                        {a.name}
-                        {a.onCooldown && <span className="text-inkDim font-normal ml-1">· Abklingzeit</span>}
+                  <div key={a.id} className={`rounded-xl border overflow-hidden ${disabled ? 'border-border bg-bgElevated opacity-40' : 'border-border bg-bgElevated'}`}>
+                    <button disabled={disabled} onClick={() => onUseAbility(p.id, a.id)}
+                      className="w-full text-left px-3.5 py-2.5 flex items-center justify-between gap-3 active:scale-[0.98] transition-all">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-ink flex items-center gap-1.5">
+                          {a.name}
+                          {bonus > 0 && <span className="text-[9px] text-heal font-bold bg-heal/10 border border-heal/30 rounded px-1">+{bonus}</span>}
+                          {a.onCooldown && <span className="text-inkDim font-normal">· Abklingzeit</span>}
+                        </div>
+                        <div className="text-[10px] text-inkDim mt-0.5 leading-relaxed">{a.desc}</div>
                       </div>
-                      <div className="text-[10px] text-inkDim mt-0.5 leading-relaxed">{a.desc}</div>
-                    </div>
-                    {!disabled && (
-                      <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center border"
-                        style={{ borderColor: classColor + '60', background: classColor + '20', color: classColor }}>
-                        <span className="text-xs font-bold">▶</span>
-                      </div>
-                    )}
-                  </button>
+                      {!disabled && (
+                        <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center border"
+                          style={{ borderColor: classColor + '60', background: classColor + '20', color: classColor }}>
+                          <span className="text-xs font-bold">▶</span>
+                        </div>
+                      )}
+                    </button>
+                  </div>
                 );
               })}
               {available <= 0 && (
@@ -3551,6 +3681,18 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility }) {
           </div>
         );
       })}
+
+      {showUpgrade && (() => {
+        const p = profiles.find(pr => pr.id === activeProfileId);
+        if (!p) return null;
+        return (
+          <AbilityUpgradeModal
+            profile={p}
+            onUpgrade={id => { onUpgradeAbility(id); }}
+            onClose={() => setShowUpgrade(false)}
+          />
+        );
+      })()}
 
       {/* Kampf-Log */}
       <div>
@@ -5339,6 +5481,18 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     pushToast('Shop gespeichert.', 'info');
   }
 
+  function handleUpgradeAbility(abilityId) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || (p.abilityUpgradePoints || 0) <= 0) return;
+      p.abilityUpgradePoints -= 1;
+      if (!p.abilityUpgrades) p.abilityUpgrades = {};
+      p.abilityUpgrades[abilityId] = (p.abilityUpgrades[abilityId] || 0) + 2;
+      addLog(s, `⬆️ ${p.name} hat ${abilityId} aufgewertet (+2 Bonus).`);
+    });
+    pushToast('+2 Ability-Bonus angelegt!', 'info');
+  }
+
   function handleBuyStreakFreeze() {
     if ((activeProfile.streakFreezes || 0) >= STREAK_FREEZE_CAP) return;
     if ((activeProfile.gold || 0) < STREAK_FREEZE_COST) return;
@@ -5575,9 +5729,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               <span className="font-stat text-xl text-orange font-bold leading-none">{computeStreak(activeProfile)}</span>
             </div>
             {streakBump && (
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[11px] font-stat font-bold text-orange float-num pointer-events-none">
-                +1
-              </span>
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[11px] font-stat font-bold text-orange float-num pointer-events-none">+1</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -5606,7 +5758,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onOpenEditCalendar={(item) => setCalendarModal({ mode: 'edit', item })} />
       )}
       {activeTab === 'kampf' && (
-        <CombatTab state={state} profiles={state.profiles} activeProfileId={activeProfile.id} onUseAbility={handleUseAbility} />
+        <CombatTab state={state} profiles={state.profiles} activeProfileId={activeProfile.id} onUseAbility={handleUseAbility} onUpgradeAbility={handleUpgradeAbility} />
       )}
       {activeTab === 'shop' && partnerProfile && (
         <ShopTab state={state} profile={activeProfile} partner={partnerProfile}
