@@ -3486,7 +3486,70 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
    9. TAB: KAMPF
    ============================================================ */
 
+function AbilityUpgradeModal({ profile, onUpgrade, onClose }) {
+  const cls = getClass(profile);
+  const classColor = cls.id === 'krieger' ? '#c1543c' : cls.id === 'magier' ? '#7d70e0' : '#9fd6c4';
+  const points = profile.abilityUpgradePoints || 0;
+  const upgrades = profile.abilityUpgrades || {};
+  const abilities = unlockedAbilities(profile);
+  const nextMilestone = nextStreakUpgradeMilestone(points);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl pb-6 overflow-hidden max-h-[80vh] flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4 flex items-center justify-between border-b border-border"
+          style={{ background: classColor + '15' }}>
+          <div>
+            <div className="font-display font-bold text-base text-ink">⬆️ Ability-Upgrades</div>
+            <div className="text-xs text-inkDim mt-0.5">
+              {points > 0
+                ? <span className="text-gold font-semibold">{points} Punkt{points > 1 ? 'e' : ''} verfügbar</span>
+                : `Nächster Punkt bei 🔥${nextMilestone} Streak-Tagen`}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-inkDim text-xl px-1">✕</button>
+        </div>
+        {/* Abilities */}
+        <div className="px-4 pt-4 space-y-2.5 max-h-96 overflow-y-auto">
+          {abilities.map(a => {
+            const bonus = upgrades[a.id] || 0;
+            const canUpgrade = points > 0;
+            return (
+              <div key={a.id} className="bg-surface border border-border rounded-xl overflow-hidden">
+                <div className="px-3.5 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold text-ink flex items-center gap-2">
+                      {a.name}
+                      {bonus > 0 && (
+                        <span className="text-[10px] font-bold text-heal bg-heal/10 border border-heal/30 rounded px-1.5 py-0.5">
+                          +{bonus} aktiv
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-inkDim mt-0.5">{a.desc}</div>
+                  </div>
+                </div>
+                {canUpgrade && (
+                  <button onClick={() => onUpgrade(a.id)}
+                    className="w-full border-t py-2 text-xs font-semibold text-center active:scale-[0.99] transition-all"
+                    style={{ borderColor: classColor + '40', background: classColor + '12', color: classColor }}>
+                    +2 aufwerten · 1 Punkt verwenden
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAbility }) {
+  const [showUpgrade, setShowUpgrade] = useState(false);
+
   if (profiles.length < 2) {
     return (
       <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">
@@ -3561,30 +3624,34 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
                   <div className="text-[10px] text-inkDim">{cls.name} · Lvl {p.level}</div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="font-stat text-xl font-bold text-orange">{available}</div>
-                <div className="text-[9px] text-inkDim uppercase tracking-wide">Aktionen</div>
+              <div className="flex items-center gap-2.5">
+                {/* Upgrade-Button */}
+                <button onClick={() => setShowUpgrade(true)}
+                  className="relative w-8 h-8 rounded-lg flex items-center justify-center border active:scale-95 transition-all"
+                  style={{
+                    borderColor: upgradePoints > 0 ? classColor + '70' : '#473d57',
+                    background: upgradePoints > 0 ? classColor + '20' : 'transparent',
+                  }}>
+                  <span className="text-sm">⬆️</span>
+                  {upgradePoints > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-bg"
+                      style={{ background: classColor }}>
+                      {upgradePoints}
+                    </span>
+                  )}
+                </button>
+                <div className="text-right">
+                  <div className="font-stat text-xl font-bold text-orange">{available}</div>
+                  <div className="text-[9px] text-inkDim uppercase tracking-wide">Aktionen</div>
+                </div>
               </div>
             </div>
-            {/* Upgrade-Punkte-Anzeige */}
-            {upgradePoints > 0 && (
-              <div className="px-4 py-2 bg-gold/10 border-y border-gold/30 flex items-center justify-between">
-                <span className="text-xs text-gold font-semibold">⬆️ {upgradePoints} Upgrade-Punkt{upgradePoints > 1 ? 'e' : ''} verfügbar</span>
-                <span className="text-[10px] text-gold/70">Ability antippen zum Aufwerten</span>
-              </div>
-            )}
-            {upgradePoints === 0 && (
-              <div className="px-4 py-1.5 border-y border-border/30 flex items-center justify-between">
-                <span className="text-[10px] text-inkDim">Nächster Punkt bei 🔥{nextMilestone} Streak-Tagen</span>
-              </div>
-            )}
             <div className="h-px" style={{ background: `linear-gradient(90deg, transparent, ${classColor}80, transparent)` }} />
             {/* Ability-Buttons */}
             <div className="px-3 py-3 space-y-2">
               {unlockedAbilities(p).map(a => {
                 const disabled = a.onCooldown || available <= 0;
                 const bonus = upgrades[a.id] || 0;
-                const canUpgrade = upgradePoints > 0;
                 return (
                   <div key={a.id} className={`rounded-xl border overflow-hidden ${disabled ? 'border-border bg-bgElevated opacity-40' : 'border-border bg-bgElevated'}`}>
                     <button disabled={disabled} onClick={() => onUseAbility(p.id, a.id)}
@@ -3604,12 +3671,6 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
                         </div>
                       )}
                     </button>
-                    {canUpgrade && !disabled && (
-                      <button onClick={() => onUpgradeAbility(a.id)}
-                        className="w-full border-t border-gold/30 bg-gold/5 py-1 text-[10px] text-gold font-semibold text-center active:bg-gold/20">
-                        ⬆️ +2 aufwerten (1 Punkt)
-                      </button>
-                    )}
                   </div>
                 );
               })}
@@ -3620,6 +3681,18 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
           </div>
         );
       })}
+
+      {showUpgrade && (() => {
+        const p = profiles.find(pr => pr.id === activeProfileId);
+        if (!p) return null;
+        return (
+          <AbilityUpgradeModal
+            profile={p}
+            onUpgrade={id => { onUpgradeAbility(id); }}
+            onClose={() => setShowUpgrade(false)}
+          />
+        );
+      })()}
 
       {/* Kampf-Log */}
       <div>
@@ -5656,9 +5729,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               <span className="font-stat text-xl text-orange font-bold leading-none">{computeStreak(activeProfile)}</span>
             </div>
             {streakBump && (
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[11px] font-stat font-bold text-orange float-num pointer-events-none">
-                +1
-              </span>
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[11px] font-stat font-bold text-orange float-num pointer-events-none">+1</span>
             )}
           </div>
           <div className="flex items-center gap-2">
