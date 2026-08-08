@@ -557,6 +557,7 @@ function freshProfile(overrides) {
     streakFreezeUsedDates: [],    // Tage, die per Freeze/Streak-retten geschützt wurden
     doubleXpDate: null,           // 'YYYY-MM-DD' — falls = heute, gilt 2x XP für den Rest des Tages
     abilityUpgradePoints: 0,      // Punkte zum Verbessern von Abilities (aus Streak-Meilensteinen)
+    streakUpgradePointsEarned: 0, // Gesamt jemals verdiente Punkte (nie kleiner — Basis für Meilenstein-Check)
     abilityUpgrades: {},          // { abilityId: bonusValue } — kumulierter Bonus pro Ability
   }, overrides || {});
 }
@@ -1371,12 +1372,13 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
 
   profile.questProgress[today][questId] = stage;
 
-  // Streak-Meilensteine prüfen: falls neue Streak einen Schwellenwert überschreitet → Upgradepoint.
-  // Mehrere auf einmal möglich (z.B. wenn Streak durch Retroaktivberechnung stark springt).
+  // Streak-Meilensteine prüfen — Basis ist streakUpgradePointsEarned (wächst nie),
+  // nicht abilityUpgradePoints (sinkt beim Ausgeben). So kein doppeltes Vergeben.
   if (today === todayBerlin()) {
     const newStreak = computeStreak(profile);
     let milestonesGained = 0;
-    while (newStreak >= nextStreakUpgradeMilestone(profile.abilityUpgradePoints || 0)) {
+    while (newStreak >= nextStreakUpgradeMilestone(profile.streakUpgradePointsEarned || 0)) {
+      profile.streakUpgradePointsEarned = (profile.streakUpgradePointsEarned || 0) + 1;
       profile.abilityUpgradePoints = (profile.abilityUpgradePoints || 0) + 1;
       milestonesGained++;
     }
@@ -5094,6 +5096,31 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             p.streakFreezes -= 1;
             addLog(s, `❄️ ${p.name}: Streak-Freeze automatisch eingesetzt — Streak bleibt erhalten.`);
           }
+        }
+      });
+    });
+  }, [loading]);
+
+  // Beim ersten Laden: bestehende Streaks auf ungezahlte Meilensteine prüfen.
+  // Nötig wenn jemand schon vor dem Feature-Update eine lange Streak hatte.
+  useEffect(() => {
+    if (loading) return;
+    const needsCheck = state.profiles.some(p => {
+      const streak = computeStreak(p);
+      return streak >= nextStreakUpgradeMilestone(p.streakUpgradePointsEarned || 0);
+    });
+    if (!needsCheck) return;
+    update(s => {
+      s.profiles.forEach(p => {
+        const streak = computeStreak(p);
+        let gained = 0;
+        while (streak >= nextStreakUpgradeMilestone(p.streakUpgradePointsEarned || 0)) {
+          p.streakUpgradePointsEarned = (p.streakUpgradePointsEarned || 0) + 1;
+          p.abilityUpgradePoints = (p.abilityUpgradePoints || 0) + 1;
+          gained++;
+        }
+        if (gained > 0) {
+          addLog(s, `🔥 ${p.name}: ${gained} Streak-Meilenstein${gained > 1 ? 'e' : ''} nachgezählt (+${gained} Punkt${gained > 1 ? 'e' : ''}, Streak: ${streak} Tage).`);
         }
       });
     });
