@@ -436,13 +436,14 @@ try {
   firebase.initializeApp(FIREBASE_CONFIG);
   fbAuth = firebase.auth();
   fbDb = firebase.database();
-  // Offline-Persistenz: Daten werden lokal gecacht. Nach dem Hintergrundlegen
-  // sind sie sofort da — kein Warten auf Reconnect. Firebase synchronisiert
-  // leise im Hintergrund sobald die Verbindung wieder steht.
-  fbDb.ref('teamquest').keepSynced(true);
   FIREBASE_READY = true;
 } catch (e) {
   console.error('TeamQuest: Firebase-Initialisierung fehlgeschlagen — FIREBASE_CONFIG korrekt?', e);
+}
+
+// Offline-Persistenz separat — ein Fehler hier darf die App nicht blockieren.
+if (FIREBASE_READY) {
+  try { fbDb.ref('teamquest').keepSynced(true); } catch (e) { /* optional */ }
 }
 
 // Eindeutige Kennung für dieses Gerät/diese Seitenladung — verhindert, dass
