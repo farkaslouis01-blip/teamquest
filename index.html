@@ -4872,13 +4872,12 @@ function TodoSidebar({ profile, open, onToggle, onAdd, onCheck, onDelete }) {
 
       {/* Sidebar */}
       <div className="fixed top-0 left-0 h-full z-50 flex"
-        style={{ transform: open ? 'translateX(0)' : 'translateX(-268px)', transition: 'transform 280ms cubic-bezier(0.4,0,0.2,1)' }}>
+        style={{ transform: open ? 'translateX(0)' : 'translateX(-316px)', transition: 'transform 280ms cubic-bezier(0.4,0,0.2,1)' }}>
 
         {/* Panel */}
-        <div className="w-64 h-full bg-bgElevated border-r border-border flex flex-col shadow-2xl">
+        <div className="w-80 h-full bg-bgElevated border-r border-border flex flex-col shadow-2xl">
           <div className="px-4 pt-10 pb-3 border-b border-border shrink-0">
             <div className="font-display font-bold text-gold text-base">Notizen & ToDos</div>
-            <div className="text-[10px] text-inkDim mt-0.5">Kein festes Datum nötig</div>
           </div>
 
           {/* Input */}
@@ -4889,7 +4888,7 @@ function TodoSidebar({ profile, open, onToggle, onAdd, onCheck, onDelete }) {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && submit()}
-                placeholder="Neue Aufgabe…"
+                placeholder="Hinzufügen…"
                 className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink placeholder-inkDim/50 min-w-0"
               />
               <button onClick={submit}
@@ -5936,7 +5935,20 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   return (
     <>
-    <div className="max-w-md mx-auto min-h-screen relative">
+    <div className="max-w-md mx-auto min-h-screen relative"
+      onTouchStart={e => {
+        const t = e.touches[0];
+        if (t.clientX < 30) e.currentTarget._swipeStartX = t.clientX;
+        else e.currentTarget._swipeStartX = null;
+      }}
+      onTouchEnd={e => {
+        const startX = e.currentTarget._swipeStartX;
+        if (startX == null) return;
+        const endX = e.changedTouches[0].clientX;
+        if (endX - startX > 50) setSidebarOpen(true);
+        e.currentTarget._swipeStartX = null;
+      }}
+    >
       <ToastStack toasts={toasts} />
 
       {/* Freizeit-Timer Vollbild */}
@@ -5960,9 +5972,16 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
       <div className="sticky top-0 z-30 bg-bgElevated/95 backdrop-blur border-b border-border relative">
         <div className="px-4 py-3 flex items-center justify-between relative">
-          <div className="font-display font-bold text-gold text-base tracking-wide flex items-center gap-1.5">
-            TeamQuest
-            <ConnectionDot status={connStatus} />
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSidebarOpen(o => !o)}
+              className="text-inkDim w-7 h-7 flex items-center justify-center rounded-lg active:scale-95"
+              aria-label="Notizen öffnen">
+              📝
+            </button>
+            <div className="font-display font-bold text-gold text-base tracking-wide flex items-center gap-1.5">
+              TeamQuest
+              <ConnectionDot status={connStatus} />
+            </div>
           </div>
           <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5"
             title={`Beste Streak: ${computeBestStreak(activeProfile)} Tage`}>
