@@ -672,7 +672,8 @@ function migrateState(loaded) {
 function getClass(profile) { return CLASSES[profile.classKey] || CLASSES.krieger; }
 
 function teamHpMax(state) {
-  if (state.profiles.length < 2) return 0;
+  if (state.profiles.length === 0) return 100;
+  if (state.profiles.length === 1) return getClass(state.profiles[0]).teamHp;
   const [a, b] = state.profiles;
   return getClass(a).teamHp + getClass(b).teamHp;
 }
@@ -2233,7 +2234,7 @@ function ProfileSelectScreen({ profiles, onSelect, onCreateNew }) {
       </div>
       {profiles.length < 2 && (
         <div className="text-xs text-inkDim mt-8 max-w-xs text-center">
-          Das Kampfsystem braucht genau zwei Profile — legt also für euch beide ein Profil an.
+          Mit einem zweiten Profil können Shop-Käufe gemeinsam bestätigt und Gold aufgeteilt werden.
         </div>
       )}
     </div>
@@ -3585,13 +3586,6 @@ function AbilityUpgradeModal({ profile, onUpgrade, onClose }) {
 function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAbility }) {
   const [showUpgrade, setShowUpgrade] = useState(false);
 
-  if (profiles.length < 2) {
-    return (
-      <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">
-        Das Kampfsystem braucht genau zwei Profile.<br />Legt unter "Mehr" ein zweites Profil an.
-      </div>
-    );
-  }
   const boss = bossStatsForTier(state.combat.bossTier);
   const teamMax = teamHpMax(state);
   const bossHpPct = state.combat.bossHp / boss.hp;
@@ -5346,9 +5340,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     Storage.save(pairingCode, state);
   }, [state]);
 
-  // Team-HP beim allerersten Laden mit zwei Profilen initialisieren.
+  // Team-HP initialisieren sobald mind. ein Profil vorhanden und teamHp noch null.
   useEffect(() => {
-    if (state.profiles.length === 2 && state.combat.teamHp === null) {
+    if (state.profiles.length >= 1 && state.combat.teamHp === null) {
       setState(s => ({ ...s, combat: { ...s.combat, teamHp: teamHpMax(s) } }));
     }
   }, [state.profiles.length]);
@@ -5768,6 +5762,17 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleBuy(item, category, buyerPaid) {
+    // Solo: kein Partner → sofort kaufen, kein Bestätigungs-Workflow nötig
+    if (!partnerProfile) {
+      update(s => {
+        const p = s.profiles.find(pr => pr.id === activeProfile.id);
+        if (!p || p.gold < item.cost) return;
+        p.gold -= item.cost;
+        addLog(s, `🛒 ${p.name} kauft "${item.title}" für ${item.cost} G.`);
+      });
+      pushToast(`"${item.title}" gekauft!`, 'info');
+      return;
+    }
     if (!partnerProfile) return;
     const partnerPaid = category === 'gemeinsam' ? item.cost - buyerPaid : 0;
     update(s => {
@@ -6021,14 +6026,11 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       {activeTab === 'kampf' && (
         <CombatTab state={state} profiles={state.profiles} activeProfileId={activeProfile.id} onUseAbility={handleUseAbility} onUpgradeAbility={handleUpgradeAbility} />
       )}
-      {activeTab === 'shop' && partnerProfile && (
+      {activeTab === 'shop' && (
         <ShopTab state={state} profile={activeProfile} partner={partnerProfile}
           onBuy={handleBuy} onAddShopItem={handleAddShopItem} onEditShopItems={handleEditShopItems}
           onConfirm={handleConfirm} onDecline={handleDecline}
           onBuyStreakFreeze={handleBuyStreakFreeze} onRepairStreak={handleRepairStreak} onBuyDoubleXp={handleBuyDoubleXp} />
-      )}
-      {activeTab === 'shop' && !partnerProfile && (
-        <div className="px-4 pt-10 pb-28 text-center text-inkDim text-sm">Der Shop braucht ein zweites Profil.</div>
       )}
       {activeTab === 'kalender' && (
         <div className="px-4 pt-4 pb-28 space-y-4">
