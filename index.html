@@ -5026,16 +5026,23 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   }, []);
 
   const sessionMins = calcCurrentSessionMinutes(work);
-  const requiredMins = (work.hoursPerDay || 8) * 60 + (work.penaltyMinutesToday || 0);
+  const isWorkDay = isWorkDayToday(work);
+  const requiredMins = isWorkDay ? (work.hoursPerDay || 8) * 60 + (work.penaltyMinutesToday || 0) : 0;
   const isPaused = !!work.pauseStart;
   const isSick = isSickToday(work);
-  const penalty = calcPenaltyMinutes(work);
+  const penalty = isWorkDay ? calcPenaltyMinutes(work) : 0;
 
   const displayMins = Math.floor(sessionMins % 60);
   const displayHrs = Math.floor(sessionMins / 60);
   const displaySecs = Math.floor((sessionMins * 60) % 60);
-  const progress = Math.min(1, sessionMins / requiredMins);
-  const progressColor = sessionMins < requiredMins ? '#d4a843' : '#4a9b6e';
+  // Kein Tagesziel an Nicht-Arbeitstagen → Ring zeigt Fortschritt zum Max-Überstunden-Limit
+  const maxOT = work.maxOvertimePerDay ?? 90;
+  const progress = requiredMins > 0
+    ? Math.min(1, sessionMins / requiredMins)
+    : Math.min(1, sessionMins / maxOT);
+  const progressColor = requiredMins > 0
+    ? (sessionMins < requiredMins ? '#d4a843' : '#4a9b6e')
+    : '#4a9b6e'; // immer grün an freien Tagen
 
   const R = 110, STROKE = 14, C = 2 * Math.PI * R;
   const dashOffset = C * (1 - progress);
@@ -5106,7 +5113,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
                 :{String(displaySecs).padStart(2,'0')}
               </text>
               <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
-                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen`}
+                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : isWorkDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : 'Freier Tag — alles → Überstunden'}
               </text>
             </>) : (<>
               <text x="130" y="125" textAnchor="middle" fill="white" fontSize="15">▶</text>
