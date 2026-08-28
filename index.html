@@ -565,6 +565,29 @@ function freshProfile(overrides) {
     streakUpgradePointsEarned: 0, // Gesamt jemals verdiente Punkte (nie kleiner — Basis für Meilenstein-Check)
     abilityUpgrades: {},          // { abilityId: bonusValue } — kumulierter Bonus pro Ability
     todos: [],                    // [{ id, text, done, createdAt, doneAt }] — persönliche To-Do-Liste
+    work: {
+      enabled: false,
+      // Einstellungen
+      workDays: [1,2,3,4,5],    // 1=Mo…5=Fr (JS getDay: 0=So,1=Mo,…,6=Sa)
+      hoursPerDay: 8,            // Soll-Stunden pro Tag
+      startTime: '09:30',        // Spätester Beginn ohne Strafe (HH:MM)
+      vacationDaysPerYear: 30,   // Urlaubstage laut Vertrag
+      startDate: null,           // 'YYYY-MM-DD' — Anstellungsbeginn (für anteilige Berechnung)
+      maxOvertimePerDay: 90,     // Max. anrechenbare Überstunden pro Tag in Minuten
+      // Konten
+      overtimeMinutes: 0,        // Gesamtes Überstundenkonto in Minuten
+      vacationDaysUsed: 0,       // Genutzte Urlaubstage (kann Dezimalzahl sein)
+      vacationDays: [],          // [{ from, to, type: 'vacation'|'overtime' }] — eingetragene Urlaubszeiträume
+      // Aktive Session
+      clockedIn: false,
+      sessionStart: null,        // Unix-ms Einst.-Zeitpunkt (nach letzter Pause)
+      pauseStart: null,          // Unix-ms Pause-Beginn (null = keine aktive Pause)
+      pausedMinutesToday: 0,     // Pausen der heutigen Session in Minuten
+      sessionDate: null,         // 'YYYY-MM-DD' — Datum der laufenden Session
+      // Krankmeldungen + Log
+      sickDays: [],              // [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', note: '' }]
+      workLog: [],               // [{ date, type, clockIn, clockOut, workedMinutes, requiredMinutes, overtimeDelta, penaltyMinutes, breaks }]
+    },
   }, overrides || {});
 }
 
@@ -1383,6 +1406,68 @@ function hasRepairableStreakGap(profile) {
   const hasEntries = d => (progress[d] && Object.keys(progress[d]).length > 0) || frozen.has(d);
   if (hasEntries(yesterday)) return false; // gestern war schon ok, nichts kaputt
   return hasEntries(addDays(yesterday, -1));
+}
+
+// ============================================================
+// ARBEITSZEITERFASSUNG — Hilfsfunktionen
+// ============================================================
+
+function isWorkDayToday(work) {
+  const day = new Date().getDay(); // 0=So, 1=Mo…6=Sa
+  return (work.workDays || [1,2,3,4,5]).includes(day);
+}
+
+function isSickToday(work) {
+  const today = todayBerlin();
+  return (work.sickDays || []).some(s => s.from <= today && today <= s.to);
+}
+
+function calcPenaltyMinutes(work) {
+  if (isSickToday(work)) return 0;
+  const [sh, sm] = (work.startTime || '09:30').split(':').map(Number);
+  const now = new Date();
+  const late = (now.getHours() * 60 + now.getMinutes()) - (sh * 60 + sm);
+  return Math.max(0, late);
+}
+
+function calcProRatedVacation(work) {
+  const total = work.vacationDaysPerYear || 30;
+  const start = work.startDate;
+  if (!start) return total;
+  const today = todayBerlin();
+  const year = today.slice(0, 4);
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  const effectiveStart = start > yearStart ? start : yearStart;
+  const msDiff = (d1, d2) => new Date(d2 + 'T00:00:00') - new Date(d1 + 'T00:00:00');
+  const daysInYear = msDiff(yearStart, yearEnd) / 86400000 + 1;
+  const remainingDays = msDiff(effectiveStart, yearEnd) / 86400000 + 1;
+  return Math.round((total * (remainingDays / daysInYear)) * 10) / 10;
+}
+
+function calcAvailableVacation(work) {
+  return Math.max(0, calcProRatedVacation(work) - (work.vacationDaysUsed || 0));
+}
+
+function calcCurrentSessionMinutes(work) {
+  if (!work.clockedIn || !work.sessionStart) return 0;
+  const nowMs = Date.now();
+  const pausedMs = (work.pausedMinutesToday || 0) * 60000;
+  const currentPauseMs = work.pauseStart ? (nowMs - work.pauseStart) : 0;
+  return Math.max(0, (nowMs - work.sessionStart - pausedMs - currentPauseMs) / 60000);
+}
+
+function formatHM(minutes) {
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = Math.floor(abs % 60);
+  const sign = minutes < 0 ? '-' : '';
+  return `${sign}${h > 0 ? h + 'h ' : ''}${m}min`;
+}
+
+function formatTimeHHMM(ts) {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
 // Eine Quest-Stufe abschließen. Gibt zurück, ob dadurch eine Kampf-Aktion frei wurde.
@@ -4241,15 +4326,20 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const hasDeadline = Object.values(profile.questDeadlines || {}).some(d => d && d.date === dateStr);
             const isSelected = selectedDate === dateStr;
             const isToday = dateStr === todayBerlin();
+            const isVacation = (profile.work?.vacationDays || []).some(v => v.from <= dateStr && dateStr <= v.to);
+            const isSick = (profile.work?.sickDays || []).some(s => s.from <= dateStr && dateStr <= s.to);
             return (
               <button
                 key={i}
                 onClick={() => onSelectDate(isSelected ? null : dateStr)}
                 className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
-                  isSelected ? 'bg-gold/15 border-gold' : isToday ? 'bg-shield/20 border-shield' : 'bg-surface border-border'
+                  isSelected ? 'bg-gold/15 border-gold' :
+                  isVacation ? 'bg-[#c026d3]/10 border-[#c026d3]/60' :
+                  isSick ? 'bg-hp/10 border-hp/40' :
+                  isToday ? 'bg-shield/20 border-shield' : 'bg-surface border-border'
                 }`}
               >
-                <span className={isToday ? 'text-shield font-bold' : 'text-inkDim'}>{d}</span>
+                <span className={isToday ? 'text-shield font-bold' : isVacation ? 'text-[#c026d3]' : isSick ? 'text-hp' : 'text-inkDim'}>{d}</span>
                 <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
                   {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
@@ -4670,7 +4760,7 @@ function BirthdaysSection({ birthdays, activeProfileId, onAdd, onDelete }) {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleFreizeit, onShowFreizeitAnalysis, onAddBirthday, onDeleteBirthday, onResetAbilityUpgrades }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleFreizeit, onShowFreizeitAnalysis, onToggleWork, onUpdateWorkSettings, onShowWorkAnalysis, onAddBirthday, onDeleteBirthday, onResetAbilityUpgrades }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -4735,6 +4825,27 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
               className="w-full border border-dashed border-gold/50 rounded-2xl py-3 text-sm text-gold active:scale-[0.99]">
               📊 Freizeit-Analyse
             </button>
+          )}
+          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-ink">🕐 Arbeitszeiterfassung</div>
+              <div className="text-xs text-inkDim mt-1 leading-relaxed">
+                Einstempeln, Pausen, Überstunden, Urlaub und Krankmeldungen.
+              </div>
+            </div>
+            <button onClick={onToggleWork}
+              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${(profile.work||{}).enabled ? 'bg-gold' : 'bg-border'}`}>
+              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${(profile.work||{}).enabled ? 'left-5' : 'left-0.5'}`}></span>
+            </button>
+          </div>
+          {(profile.work||{}).enabled && (
+            <>
+              <WorkSettings work={profile.work} onChange={onUpdateWorkSettings} />
+              <button onClick={onShowWorkAnalysis}
+                className="w-full border border-dashed border-gold/40 rounded-2xl py-3 text-sm text-gold active:scale-[0.99]">
+                📊 Arbeitszeitanalyse
+              </button>
+            </>
           )}
           <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
             <div className="pr-3">
@@ -4833,6 +4944,408 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
       {showSportAnalysis && (
         <SportAnalysisModal profile={profile} onClose={() => setShowSportAnalysis(false)} />
       )}
+    </div>
+  );
+}
+
+/* ============================================================
+   ARBEITSZEITERFASSUNG — Komponenten
+   ============================================================ */
+
+const WEEK_DAYS = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+
+function WorkSettings({ work, onChange }) {
+  function set(key, val) { onChange({ ...work, [key]: val }); }
+  function toggleDay(d) {
+    const days = work.workDays || [1,2,3,4,5];
+    set('workDays', days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort());
+  }
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-xs text-inkDim mb-2">Arbeitstage</div>
+        <div className="flex gap-1.5">
+          {[1,2,3,4,5,6,0].map(d => (
+            <button key={d} onClick={() => toggleDay(d)}
+              className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                (work.workDays||[1,2,3,4,5]).includes(d)
+                  ? 'bg-gold/20 border-gold/60 text-gold'
+                  : 'bg-surface border-border text-inkDim'}`}>
+              {WEEK_DAYS[d]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-xs text-inkDim mb-1.5">Stunden/Tag</div>
+          <input type="number" min={1} max={24} value={work.hoursPerDay||8}
+            onChange={e => set('hoursPerDay', Number(e.target.value))}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+        </div>
+        <div>
+          <div className="text-xs text-inkDim mb-1.5">Arbeitsbeginn (spätestens)</div>
+          <input type="time" value={work.startTime||'09:30'}
+            onChange={e => set('startTime', e.target.value)}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+        </div>
+        <div>
+          <div className="text-xs text-inkDim mb-1.5">Urlaubstage/Jahr</div>
+          <input type="number" min={0} max={60} value={work.vacationDaysPerYear||30}
+            onChange={e => set('vacationDaysPerYear', Number(e.target.value))}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+        </div>
+        <div>
+          <div className="text-xs text-inkDim mb-1.5">Anstellungsbeginn</div>
+          <input type="date" value={work.startDate||''}
+            onChange={e => set('startDate', e.target.value || null)}
+            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+        </div>
+      </div>
+      <div>
+        <div className="text-xs text-inkDim mb-1.5">Max. Überstunden/Tag (Min)</div>
+        <input type="number" min={0} max={240} value={work.maxOvertimePerDay??90}
+          onChange={e => set('maxOvertimePerDay', Number(e.target.value))}
+          className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+      </div>
+    </div>
+  );
+}
+
+function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime }) {
+  const work = profile.work || {};
+  const [tick, setTick] = useState(0);
+  const [showSick, setShowSick] = useState(false);
+  const [sickFrom, setSickFrom] = useState(todayBerlin());
+  const [sickTo, setSickTo] = useState(todayBerlin());
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
+
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const sessionMins = calcCurrentSessionMinutes(work);
+  const requiredMins = (work.hoursPerDay || 8) * 60 + (work.penaltyMinutesToday || 0);
+  const isPaused = !!work.pauseStart;
+  const isSick = isSickToday(work);
+  const penalty = calcPenaltyMinutes(work);
+
+  const displayMins = Math.floor(sessionMins % 60);
+  const displayHrs = Math.floor(sessionMins / 60);
+  const displaySecs = Math.floor((sessionMins * 60) % 60);
+  const progress = Math.min(1, sessionMins / requiredMins);
+  const progressColor = sessionMins < requiredMins ? '#d4a843' : '#4a9b6e';
+
+  const R = 110, STROKE = 14, C = 2 * Math.PI * R;
+  const dashOffset = C * (1 - progress);
+
+  const [showVacation, setShowVacation] = useState(false);
+  const [vacFrom, setVacFrom] = useState(todayBerlin());
+  const [vacTo, setVacTo] = useState(todayBerlin());
+
+  // Vor Anstellungsdatum: nicht einstempeln erlauben
+  const notStartedYet = work.startDate && todayBerlin() < work.startDate;
+
+  function handleStop() {
+    const workedMins = sessionMins;
+    const reqMins = requiredMins;
+    const raw = workedMins - reqMins;
+    const max = work.maxOvertimePerDay ?? 90;
+    const overtime = Math.min(Math.max(0, raw), max);
+    const deficit = raw < 0 ? raw : 0;
+    onClockOut({ workedMins, reqMins, overtimeDelta: overtime + deficit });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex justify-center bg-black/30">
+      <div className="w-full max-w-md bg-bg flex flex-col items-center justify-between py-14 px-6">
+        {/* Header */}
+        <div className="w-full flex items-center justify-between">
+          <button onClick={onClose} className="text-inkDim text-sm">✕ Schließen</button>
+          <div className="flex flex-col items-center gap-1">
+            <div className="font-display font-bold text-gold text-xl">Arbeitszeit</div>
+            <div className="flex gap-2">
+              {isSick && <div className="text-xs text-hp">🤒 Krank</div>}
+            </div>
+            <div className="flex gap-2 mt-0.5">
+              <button onClick={() => setShowSick(true)} className="text-xs text-inkDim border border-border rounded-lg px-2.5 py-1 active:scale-95">
+                🤒 Krank
+              </button>
+              <button onClick={() => setShowVacation(true)} className="text-xs text-inkDim border border-border rounded-lg px-2.5 py-1 active:scale-95">
+                🌴 Urlaub
+              </button>
+            </div>
+          </div>
+          <div style={{ width: 60 }} />
+        </div>
+
+        {/* Ring */}
+        {notStartedYet ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8">
+            <div className="text-5xl">📅</div>
+            <div className="text-ink font-semibold text-center">Arbeit beginnt erst am</div>
+            <div className="font-display text-gold text-2xl">{work.startDate?.split('-').reverse().join('.')}</div>
+            <div className="text-xs text-inkDim text-center">Du kannst dich erst ab diesem Datum einstempeln.</div>
+          </div>
+        ) : (
+        <div onClick={work.clockedIn ? (isPaused ? onResume : () => setShowStopConfirm(true)) : onClockIn}
+          className="relative cursor-pointer">
+          <svg width="260" height="260" viewBox="0 0 260 260">
+            <circle cx="130" cy="130" r={R} fill="none" stroke="#1e1e2e" strokeWidth={STROKE} />
+            <circle cx="130" cy="130" r={R} fill="none" stroke={progressColor} strokeWidth={STROKE}
+              strokeLinecap="round" strokeDasharray={C} strokeDashoffset={dashOffset}
+              transform="rotate(-90 130 130)"
+              style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.5s' }} />
+            <circle cx="130" cy="130" r="80" fill="transparent" />
+            {work.clockedIn ? (<>
+              <text x="130" y="112" textAnchor="middle" fill="white" fontSize="42" fontWeight="bold" fontFamily="monospace">
+                {String(displayHrs).padStart(2,'0')}:{String(displayMins).padStart(2,'0')}
+              </text>
+              <text x="130" y="140" textAnchor="middle" fill="#555" fontSize="18" fontFamily="monospace">
+                :{String(displaySecs).padStart(2,'0')}
+              </text>
+              <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
+                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen`}
+              </text>
+            </>) : (<>
+              <text x="130" y="125" textAnchor="middle" fill="white" fontSize="15">▶</text>
+              <text x="130" y="148" textAnchor="middle" fill="#888" fontSize="13">Antippen zum Einstempeln</text>
+              {penalty > 0 && !isSick && (
+                <text x="130" y="170" textAnchor="middle" fill="#e55353" fontSize="11">
+                  ⚠ {penalty} Min Strafe bei Start jetzt
+                </text>
+              )}
+            </>)}
+          </svg>
+        </div>
+        )}
+
+        {/* Infoleiste */}
+        <div className="w-full space-y-2">
+          {work.clockedIn && (
+            <div className="flex gap-2">
+              {isPaused ? (
+                <button onClick={onResume}
+                  className="flex-1 bg-gold/20 border border-gold/50 text-gold rounded-xl py-3 text-sm font-semibold active:scale-95">
+                  ▶ Fortsetzen
+                </button>
+              ) : (
+                <button onClick={onPause}
+                  className="flex-1 bg-surface border border-border text-inkDim rounded-xl py-3 text-sm font-semibold active:scale-95">
+                  ⏸ Pause
+                </button>
+              )}
+              <button onClick={() => setShowStopConfirm(true)}
+                className="flex-1 bg-surface border border-border text-ink rounded-xl py-3 text-sm font-semibold active:scale-95">
+                ⏹ Ausstempeln
+              </button>
+            </div>
+          )}
+          <div className="flex justify-between text-xs text-inkDim px-1 items-center">
+            <span>Überstundenkonto: <span className={work.overtimeMinutes >= 0 ? 'text-heal' : 'text-hp'}>{formatHM(work.overtimeMinutes||0)}</span></span>
+            <button
+              onClick={() => onBuyOvertime()}
+              disabled={profile.gold < 1}
+              className="flex items-center gap-1 border border-gold/40 bg-gold/10 text-gold rounded-lg px-2 py-1 disabled:opacity-30 active:scale-95 text-[10px] font-semibold">
+              1 G → 1 Min
+            </button>
+            <span>Urlaub: <span className="text-gold">{calcAvailableVacation(work).toFixed(1)} Tage</span></span>
+          </div>
+        </div>
+
+        {/* Krankmeldungs-Modal */}
+        {showSick && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
+            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
+              <div className="font-display font-bold text-hp">🤒 Krankmeldung</div>
+              <div className="space-y-2">
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-inkDim w-12">Von</span>
+                  <input type="date" value={sickFrom} onChange={e => setSickFrom(e.target.value)}
+                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-inkDim w-12">Bis</span>
+                  <input type="date" value={sickTo} onChange={e => setSickTo(e.target.value)}
+                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowSick(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
+                <button onClick={() => { onAddSickDay(sickFrom, sickTo); setShowSick(false); }}
+                  className="flex-1 bg-hp/20 border border-hp/50 text-hp rounded-xl py-2.5 text-sm font-semibold">
+                  Speichern
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Urlaubs-Modal */}
+        {showVacation && (() => {
+          // Arbeitstage im gewählten Zeitraum berechnen (live Preview)
+          let previewDays = 0;
+          let pd = vacFrom;
+          while (pd <= vacTo) {
+            const dow = new Date(pd + 'T00:00:00').getDay();
+            if ((work.workDays || [1,2,3,4,5]).includes(dow)) previewDays++;
+            pd = addDays(pd, 1);
+          }
+          const minutesNeeded = previewDays * (work.hoursPerDay || 8) * 60;
+          const canUseOvertime = (work.overtimeMinutes || 0) >= minutesNeeded;
+          const availableVac = calcAvailableVacation(work);
+
+          return (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
+            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
+              <div className="font-display font-bold text-gold">🌴 Urlaub eintragen</div>
+              <div className="space-y-2">
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-inkDim w-12">Von</span>
+                  <input type="date" value={vacFrom} onChange={e => {
+                    const v = e.target.value;
+                    setVacFrom(v);
+                    if (vacTo < v) setVacTo(v);
+                  }} className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-inkDim w-12">Bis</span>
+                  <input type="date" value={vacTo} min={vacFrom} onChange={e => setVacTo(e.target.value)}
+                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
+                </div>
+              </div>
+              {/* Live-Vorschau */}
+              {previewDays > 0 && (
+                <div className="bg-surface rounded-xl px-3 py-2.5 text-xs space-y-1">
+                  <div className="flex justify-between"><span className="text-inkDim">Arbeitstage</span><span className="font-stat text-ink">{previewDays}</span></div>
+                  <div className="flex justify-between"><span className="text-inkDim">Urlaubstage verfügbar</span><span className={`font-stat ${availableVac >= previewDays ? 'text-heal' : 'text-hp'}`}>{availableVac.toFixed(1)}</span></div>
+                  <div className="flex justify-between"><span className="text-inkDim">Überstunden verfügbar</span><span className={`font-stat ${canUseOvertime ? 'text-heal' : 'text-hp'}`}>{formatHM(work.overtimeMinutes||0)}</span></div>
+                </div>
+              )}
+              {/* Typ-Auswahl */}
+              <div className="space-y-2">
+                <button onClick={() => { onAddVacation(vacFrom, vacTo, 'vacation'); setShowVacation(false); }}
+                  disabled={availableVac < previewDays}
+                  className="w-full bg-[#c026d3]/15 border border-[#c026d3]/50 text-[#c026d3] disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold active:scale-[0.99]">
+                  🌴 Urlaubstage verwenden ({previewDays} Tage)
+                </button>
+                <button onClick={() => { onAddVacation(vacFrom, vacTo, 'overtime'); setShowVacation(false); }}
+                  disabled={!canUseOvertime}
+                  className="w-full bg-heal/10 border border-heal/40 text-heal disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold active:scale-[0.99]">
+                  ⏱ Überstunden einlösen (–{formatHM(minutesNeeded)})
+                </button>
+              </div>
+              {/* Bestehende Einträge */}
+              {(work.vacationDays||[]).length > 0 && (
+                <div className="border-t border-border pt-3 space-y-1.5">
+                  <div className="text-xs text-inkDim font-semibold">Eingetragene Urlaubstage</div>
+                  {[...(work.vacationDays||[])].sort((a,b) => a.from.localeCompare(b.from)).map((v, idx) => {
+                    const key = v.id || v.from + idx;
+                    const deleteKey = v.id || v.from;
+                    return (
+                    <div key={key} className="flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-ink">{v.from === v.to ? v.from : `${v.from} – ${v.to}`}</span>
+                        {v.days != null && <span className="text-inkDim ml-1.5">({v.days} Tage · {v.type === 'overtime' ? '⏱ Überstunden' : '🌴 Urlaub'})</span>}
+                      </div>
+                      <button onClick={() => onDeleteVacation(deleteKey)}
+                        className="text-hp ml-2 px-1.5 py-0.5 border border-hp/30 rounded active:scale-95">
+                        ↩
+                      </button>
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
+              <button onClick={() => setShowVacation(false)} className="w-full border border-border rounded-xl py-2.5 text-sm text-inkDim">Schließen</button>
+            </div>
+          </div>
+          );
+        })()}
+
+        {/* Ausstempeln-Bestätigung */}
+        {showStopConfirm && (
+          <div className="fixed inset-0 z-[300] flex items-end justify-center bg-black/60 px-4 pb-8">
+            <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-3">
+              <div className="font-display font-bold text-gold">Ausstempeln</div>
+              <div className="text-sm text-ink space-y-1">
+                <div>Gearbeitet: <span className="font-stat text-heal">{formatHM(sessionMins)}</span></div>
+                <div>Tagesziel: <span className="font-stat">{formatHM(requiredMins)}</span>
+                  {(work.penaltyMinutesToday||0) > 0 && <span className="text-xs text-hp ml-1">(inkl. {work.penaltyMinutesToday} Min Strafe)</span>}
+                </div>
+                {(() => {
+                  const raw = sessionMins - requiredMins;
+                  const max = work.maxOvertimePerDay ?? 90;
+                  if (raw > 0) return <div>Überstunden: <span className="font-stat text-heal">+{formatHM(Math.min(raw, max))}</span>{raw > max ? <span className="text-inkDim text-xs"> (max. {max} Min angerechnet)</span> : ''}</div>;
+                  if (raw < 0) return <div>Fehlzeit: <span className="font-stat text-hp">{formatHM(raw)}</span></div>;
+                  return <div className="text-heal">Genau pünktlich! ✓</div>;
+                })()}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowStopConfirm(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
+                <button onClick={handleStop} className="flex-1 bg-gold text-bg rounded-xl py-2.5 text-sm font-semibold">Bestätigen</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WorkAnalysis({ profile, onClose }) {
+  const work = profile.work || {};
+  const log = work.workLog || [];
+  const [range, setRange] = useState(7);
+
+  const cutoff = range === 0 ? null : addDays(todayBerlin(), -range);
+  const filtered = log.filter(e => !cutoff || e.date >= cutoff);
+
+  const workDays = filtered.filter(e => e.type === 'work');
+  const totalWorked = workDays.reduce((s, e) => s + (e.workedMinutes||0), 0);
+  const totalRequired = workDays.reduce((s, e) => s + (e.requiredMinutes||0), 0);
+  const totalOvertime = workDays.reduce((s, e) => s + (e.overtimeDelta||0), 0);
+  const sickCount = filtered.filter(e => e.type === 'sick').length;
+  const vacCount = filtered.filter(e => e.type === 'vacation').length;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 px-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <span className="font-display font-bold text-gold text-lg">Arbeitszeitanalyse</span>
+          <button onClick={onClose} className="text-inkDim text-xl">✕</button>
+        </div>
+        <div className="flex gap-2">
+          {[{l:'7 Tage',v:7},{l:'30 Tage',v:30},{l:'Max',v:0}].map(({l,v}) => (
+            <button key={v} onClick={() => setRange(v)}
+              className={`flex-1 py-2 rounded-xl text-sm font-semibold border ${range===v ? 'bg-gold/20 border-gold/60 text-gold' : 'bg-surface border-border text-inkDim'}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <div className="space-y-2.5">
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Gearbeitet</span><span className="font-stat text-ink">{formatHM(totalWorked)}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Soll</span><span className="font-stat text-ink">{formatHM(totalRequired)}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Zeitraum-Bilanz</span><span className={`font-stat ${totalOvertime>=0?'text-heal':'text-hp'}`}>{totalOvertime>=0?'+':''}{formatHM(totalOvertime)}</span></div>
+          <div className="h-px bg-border" />
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Überstundenkonto gesamt</span><span className={`font-stat ${(work.overtimeMinutes||0)>=0?'text-heal':'text-hp'}`}>{formatHM(work.overtimeMinutes||0)}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Urlaub verfügbar</span><span className="font-stat text-gold">{calcAvailableVacation(work).toFixed(1)} Tage</span></div>
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Krankheitstage (Zeitraum)</span><span className="font-stat text-ink">{sickCount}</span></div>
+        </div>
+        {workDays.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs text-inkDim font-semibold">Letzte Einträge</div>
+            {workDays.slice(-5).reverse().map((e,i) => (
+              <div key={i} className="flex justify-between text-xs text-inkDim">
+                <span>{e.date} {e.clockIn}–{e.clockOut}</span>
+                <span className={e.overtimeDelta >= 0 ? 'text-heal' : 'text-hp'}>{e.overtimeDelta>=0?'+':''}{formatHM(e.overtimeDelta)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -5185,6 +5698,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [showFreizeitAnalysis, setShowFreizeitAnalysis] = useState(false);
   const [freizeitScreenOpen, setFreizeitScreenOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [workScreenOpen, setWorkScreenOpen] = useState(false);
+  const [showWorkAnalysis, setShowWorkAnalysis] = useState(false);
+  const [showTimerChoice, setShowTimerChoice] = useState(false); // Auswahl Freizeit/Arbeit
   const confirmCallbackRef = useRef(null); // hält den onConfirm-Callback stabil
 
   // _showConfirm global registrieren — DeleteButton ruft das auf
@@ -5470,6 +5986,159 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       });
     });
     pushToast('Ability-Upgrades zurückgesetzt — Punkte neu vergeben.', 'info');
+  }
+
+  function handleToggleWork() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (p) { if (!p.work) p.work = {}; p.work.enabled = !p.work.enabled; }
+    });
+  }
+
+  function handleUpdateWorkSettings(newWork) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (p) p.work = { ...(p.work||{}), ...newWork };
+    });
+  }
+
+  function handleWorkClockIn() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      const penalty = calcPenaltyMinutes(p.work);
+      p.work.clockedIn = true;
+      p.work.sessionStart = Date.now();
+      p.work.pauseStart = null;
+      p.work.pausedMinutesToday = 0;
+      p.work.sessionDate = todayBerlin();
+      p.work.penaltyMinutesToday = penalty;
+      if (penalty > 0) addLog(s, `🕐 ${p.name} gestempelt — ${penalty} Min Strafe (${formatTimeHHMM(Date.now())} Uhr).`);
+      else addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
+    });
+  }
+
+  function handleWorkPause() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (p && p.work && !p.work.pauseStart) p.work.pauseStart = Date.now();
+    });
+  }
+
+  function handleWorkResume() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work || !p.work.pauseStart) return;
+      const pausedMins = (Date.now() - p.work.pauseStart) / 60000;
+      p.work.pausedMinutesToday = (p.work.pausedMinutesToday||0) + pausedMins;
+      p.work.pauseStart = null;
+    });
+  }
+
+  function handleWorkClockOut({ workedMins, reqMins, overtimeDelta }) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      const clockIn = formatTimeHHMM(p.work.sessionStart);
+      const clockOut = formatTimeHHMM(Date.now());
+      p.work.overtimeMinutes = (p.work.overtimeMinutes||0) + overtimeDelta;
+      if (!p.work.workLog) p.work.workLog = [];
+      p.work.workLog.push({
+        date: p.work.sessionDate || todayBerlin(),
+        type: 'work',
+        clockIn,
+        clockOut,
+        workedMinutes: Math.round(workedMins),
+        requiredMinutes: Math.round(reqMins),
+        overtimeDelta: Math.round(overtimeDelta),
+        penaltyMinutes: p.work.penaltyMinutesToday || 0,
+      });
+      p.work.clockedIn = false;
+      p.work.sessionStart = null;
+      p.work.pauseStart = null;
+      p.work.pausedMinutesToday = 0;
+      p.work.penaltyMinutesToday = 0;
+      p.work.sessionDate = null;
+      addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(workedMins)} gearbeitet, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
+    });
+    setWorkScreenOpen(false);
+    setFreizeitScreenOpen(false);
+  }
+
+  function handleAddSickDay(from, to) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      if (!p.work.sickDays) p.work.sickDays = [];
+      p.work.sickDays.push({ from, to, note: '' });
+      addLog(s, `🤒 ${p.name} krank: ${from} bis ${to}.`);
+    });
+  }
+
+  function handleAddVacation(from, to, type = 'vacation') {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      if (!p.work.vacationDays) p.work.vacationDays = [];
+      let days = 0;
+      let d = from;
+      while (d <= to) {
+        const dow = new Date(d + 'T00:00:00').getDay();
+        if ((p.work.workDays || [1,2,3,4,5]).includes(dow)) days++;
+        d = addDays(d, 1);
+      }
+      const minutesNeeded = days * (p.work.hoursPerDay || 8) * 60;
+      if (type === 'overtime') {
+        if ((p.work.overtimeMinutes || 0) < minutesNeeded) return; // nicht genug Überstunden
+        p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - minutesNeeded;
+        p.work.vacationDays.push({ id: uid('vac'), from, to, type: 'overtime', days, minutesDeducted: minutesNeeded });
+        addLog(s, `🌴 ${p.name} Urlaub (Überstunden): ${from}–${to} (${days} Tage, ${formatHM(minutesNeeded)} abgezogen).`);
+      } else {
+        if (calcAvailableVacation(p.work) < days) return; // nicht genug Urlaubstage
+        p.work.vacationDaysUsed = (p.work.vacationDaysUsed || 0) + days;
+        p.work.vacationDays.push({ id: uid('vac'), from, to, type: 'vacation', days });
+        addLog(s, `🌴 ${p.name} Urlaub: ${from}–${to} (${days} Arbeitstage).`);
+      }
+    });
+  }
+
+  function handleBuyOvertime() {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work || (p.gold || 0) < 1) return;
+      p.gold -= 1;
+      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + 1;
+      addLog(s, `⏱ ${p.name}: 1 G → 1 Min Überstunden gekauft.`);
+    });
+    pushToast('1 G → +1 Min Überstunden', 'info');
+  }
+
+  function handleDeleteVacation(vacId) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work || !p.work.vacationDays) return;
+      const entry = p.work.vacationDays.find(v => v.id === vacId || v.from === vacId);
+      if (!entry) return;
+      // Tage neu berechnen falls nicht gespeichert (Alteinträge)
+      let days = entry.days;
+      if (!days && entry.from && entry.to) {
+        days = 0;
+        let d = entry.from;
+        while (d <= entry.to) {
+          const dow = new Date(d + 'T00:00:00').getDay();
+          if ((p.work.workDays || [1,2,3,4,5]).includes(dow)) days++;
+          d = addDays(d, 1);
+        }
+      }
+      if (entry.type === 'overtime') {
+        const mins = entry.minutesDeducted || days * (p.work.hoursPerDay || 8) * 60;
+        p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + mins;
+      } else {
+        p.work.vacationDaysUsed = Math.max(0, (p.work.vacationDaysUsed || 0) - (days || 0));
+      }
+      p.work.vacationDays = p.work.vacationDays.filter(v => v.id !== vacId && v.from !== vacId);
+      addLog(s, `↩️ ${p.name}: Urlaub ${entry.from}–${entry.to} rückgängig (${days} Tage zurück).`);
+    });
   }
 
   function handleToggleSportTracking() {
@@ -5966,6 +6635,48 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         />
       )}
 
+      {/* Arbeitszeiterfassung Vollbild */}
+      {(activeProfile.work||{}).enabled && workScreenOpen && (
+        <WorkTimerScreen
+          profile={activeProfile}
+          onClose={() => setWorkScreenOpen(false)}
+          onClockIn={handleWorkClockIn}
+          onPause={handleWorkPause}
+          onResume={handleWorkResume}
+          onClockOut={handleWorkClockOut}
+          onAddSickDay={handleAddSickDay}
+          onAddVacation={handleAddVacation}
+          onDeleteVacation={handleDeleteVacation}
+          onBuyOvertime={handleBuyOvertime}
+        />
+      )}
+
+      {/* Timer-Auswahl (Freizeit vs. Arbeit) */}
+      {showTimerChoice && (
+        <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 px-4 pb-10"
+          onClick={() => setShowTimerChoice(false)}>
+          <div className="w-full max-w-md space-y-2" onClick={e => e.stopPropagation()}>
+            <button onClick={() => { setShowTimerChoice(false); setWorkScreenOpen(true); }}
+              className="w-full bg-bgElevated border border-border rounded-2xl py-4 text-base font-semibold text-ink active:scale-[0.98]">
+              🕐 Arbeitszeit erfassen
+            </button>
+            <button onClick={() => { setShowTimerChoice(false); setFreizeitScreenOpen(true); }}
+              className="w-full bg-bgElevated border border-border rounded-2xl py-4 text-base font-semibold text-ink active:scale-[0.98]">
+              ⏱ Auszeit starten
+            </button>
+            <button onClick={() => setShowTimerChoice(false)}
+              className="w-full border border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.98]">
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Arbeitszeit-Analyse */}
+      {showWorkAnalysis && (
+        <WorkAnalysis profile={activeProfile} onClose={() => setShowWorkAnalysis(false)} />
+      )}
+
       <TodoSidebar
         profile={activeProfile}
         open={sidebarOpen}
@@ -6194,6 +6905,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onToggleSportTracking={handleToggleSportTracking}
           onToggleFreizeit={handleToggleFreizeit}
           onShowFreizeitAnalysis={() => setShowFreizeitAnalysis(true)}
+          onToggleWork={handleToggleWork}
+          onUpdateWorkSettings={handleUpdateWorkSettings}
+          onShowWorkAnalysis={() => setShowWorkAnalysis(true)}
           onAddBirthday={handleAddBirthday}
           onDeleteBirthday={handleDeleteBirthday}
           onResetAbilityUpgrades={handleResetAbilityUpgrades}
@@ -6202,9 +6916,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
       <BottomNav active={activeTab} setActive={setActiveTab}
         badges={{ shop: myConfirmCount, kalender: calendarBadgeCount }}
-        freizeitEnabled={activeProfile.freizeitEnabled}
-        timerRunning={!!activeProfile.freizeitTimer?.running}
-        onTimerOpen={() => setFreizeitScreenOpen(true)} />
+        freizeitEnabled={activeProfile.freizeitEnabled || (activeProfile.work||{}).enabled}
+        timerRunning={!!activeProfile.freizeitTimer?.running || !!(activeProfile.work||{}).clockedIn}
+        onTimerOpen={() => {
+          const hasFreizeit = activeProfile.freizeitEnabled;
+          const hasWork = (activeProfile.work||{}).enabled;
+          const workRunning = !!(activeProfile.work||{}).clockedIn;
+          const freizeitRunning = !!activeProfile.freizeitTimer?.running;
+          // Läuft bereits einer? → direkt zu dem
+          if (workRunning) { setWorkScreenOpen(true); return; }
+          if (freizeitRunning) { setFreizeitScreenOpen(true); return; }
+          // Keiner läuft → Auswahl oder direkt
+          if (hasFreizeit && hasWork) { setShowTimerChoice(true); }
+          else if (hasWork) { setWorkScreenOpen(true); }
+          else { setFreizeitScreenOpen(true); }
+        }} />
 
       {editingProfile && !editingProfile.isNew && (
         <ProfileEditor
