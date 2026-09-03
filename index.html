@@ -441,11 +441,10 @@ try {
   console.error('TeamQuest: Firebase-Initialisierung fehlgeschlagen — FIREBASE_CONFIG korrekt?', e);
 }
 
-// Offline-Persistenz separat — Fehler hier blockieren die App nicht.
+// Offline-Persistenz separat — ein Fehler hier darf die App nicht blockieren.
 if (FIREBASE_READY) {
-  try { fbDb.setPersistenceEnabled(true); } catch (e) { /* ignorieren */ }
+  try { fbDb.ref('teamquest').keepSynced(true); } catch (e) { /* optional */ }
 }
-
 
 // Eindeutige Kennung für dieses Gerät/diese Seitenladung — verhindert, dass
 // ein eigener Schreibvorgang beim Zurücklesen als neue Partner-Änderung
@@ -1413,72 +1412,8 @@ function hasRepairableStreakGap(profile) {
 // ARBEITSZEITERFASSUNG — Hilfsfunktionen
 // ============================================================
 
-// Ostersonntag (Gaußscher Algorithmus)
-function easterSunday(year) {
-  const a = year%19, b = Math.floor(year/100), c = year%100;
-  const d = Math.floor(b/4), e = b%4, f = Math.floor((b+8)/25);
-  const g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15)%30;
-  const i = Math.floor(c/4), k = c%4, l = (32+2*e+2*i-h-k)%7;
-  const m = Math.floor((a+11*h+22*l)/451);
-  const month = Math.floor((h+l-7*m+114)/31);
-  const day = ((h+l-7*m+114)%31)+1;
-  return new Date(year, month-1, day);
-}
-
-function rlpHolidaysForYear(year) {
-  const e = easterSunday(year);
-  const fmt = d => { const x = new Date(e.getTime()+d*86400000); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; };
-  return new Set([
-    `${year}-01-01`, fmt(-2), fmt(1), `${year}-05-01`,
-    fmt(39), fmt(50), fmt(60),
-    `${year}-10-03`, `${year}-11-01`,
-    `${year}-12-25`, `${year}-12-26`,
-  ]);
-}
-
-function rlpHolidayName(dateStr) {
-  const year = parseInt(dateStr.slice(0,4));
-  const e = easterSunday(year);
-  const fmt = d => { const x = new Date(e.getTime()+d*86400000); return `${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`; };
-  const map = {
-    [`${year}-01-01`]: 'Neujahr',
-    [fmt(-2)]: 'Karfreitag',
-    [fmt(1)]: 'Ostermontag',
-    [`${year}-05-01`]: 'Tag der Arbeit',
-    [fmt(39)]: 'Christi Himmelfahrt',
-    [fmt(50)]: 'Pfingstmontag',
-    [fmt(60)]: 'Fronleichnam',
-    [`${year}-10-03`]: 'Tag der deutschen Einheit',
-    [`${year}-11-01`]: 'Allerheiligen',
-    [`${year}-12-25`]: '1. Weihnachtstag',
-    [`${year}-12-26`]: '2. Weihnachtstag',
-  };
-  return map[dateStr] || null;
-}
-
-// Arbeitstage zählen — ohne Wochenenden UND RLP-Feiertage
-function countWorkDays(from, to, work) {
-  const workDays = work.workDays || [1,2,3,4,5];
-  const fromYear = parseInt(from.slice(0,4)), toYear = parseInt(to.slice(0,4));
-  const holidays = new Set();
-  for (let y = fromYear; y <= toYear; y++) rlpHolidaysForYear(y).forEach(h => holidays.add(h));
-  let count = 0, d = from;
-  while (d <= to) {
-    const dow = new Date(d + 'T00:00:00').getDay();
-    if (workDays.includes(dow) && !holidays.has(d)) count++;
-    d = addDays(d, 1);
-  }
-  return count;
-}
-
-function isHolidayToday() {
-  const today = todayBerlin();
-  return rlpHolidaysForYear(parseInt(today.slice(0,4))).has(today);
-}
-
 function isWorkDayToday(work) {
-  if (isHolidayToday()) return false;
-  const day = new Date().getDay();
+  const day = new Date().getDay(); // 0=So, 1=Mo…6=Sa
   return (work.workDays || [1,2,3,4,5]).includes(day);
 }
 
@@ -1492,7 +1427,7 @@ function calcPenaltyMinutes(work) {
   const [sh, sm] = (work.startTime || '09:30').split(':').map(Number);
   const now = new Date();
   const late = (now.getHours() * 60 + now.getMinutes()) - (sh * 60 + sm);
-  return Math.min(30, Math.max(0, late)); // max. 30 Min Strafe
+  return Math.max(0, late);
 }
 
 function calcProRatedVacation(work) {
@@ -4393,29 +4328,19 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const isToday = dateStr === todayBerlin();
             const isVacation = (profile.work?.vacationDays || []).some(v => v.from <= dateStr && dateStr <= v.to);
             const isSick = (profile.work?.sickDays || []).some(s => s.from <= dateStr && dateStr <= s.to);
-            const isHoliday = (profile.work?.enabled) && rlpHolidaysForYear(parseInt(dateStr.slice(0,4))).has(dateStr);
             return (
               <button
                 key={i}
                 onClick={() => onSelectDate(isSelected ? null : dateStr)}
-                title={isHoliday ? rlpHolidayName(dateStr) : undefined}
                 className={`aspect-square flex flex-col items-center justify-center text-[10px] rounded-lg border ${
                   isSelected ? 'bg-gold/15 border-gold' :
                   isVacation ? 'bg-[#c026d3]/10 border-[#c026d3]/60' :
                   isSick ? 'bg-hp/10 border-hp/40' :
-                  isHoliday ? 'bg-orange/10 border-orange/50' :
                   isToday ? 'bg-shield/20 border-shield' : 'bg-surface border-border'
                 }`}
               >
-                <span className={
-                  isToday ? 'text-shield font-bold' :
-                  isVacation ? 'text-[#c026d3]' :
-                  isSick ? 'text-hp' :
-                  isHoliday ? 'text-orange font-semibold' :
-                  'text-inkDim'
-                }>{d}</span>
+                <span className={isToday ? 'text-shield font-bold' : isVacation ? 'text-[#c026d3]' : isSick ? 'text-hp' : 'text-inkDim'}>{d}</span>
                 <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
-                  {isHoliday && <span className="text-[7px] leading-none">✦</span>}
                   {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
                   {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
@@ -5087,7 +5012,7 @@ function WorkSettings({ work, onChange }) {
   );
 }
 
-function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT }) {
+function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime }) {
   const work = profile.work || {};
   const [tick, setTick] = useState(0);
   const [showSick, setShowSick] = useState(false);
@@ -5122,10 +5047,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   const R = 110, STROKE = 14, C = 2 * Math.PI * R;
   const dashOffset = C * (1 - progress);
 
-  const [showBuyOT, setShowBuyOT] = useState(false);
-  const [buyOTAmount, setBuyOTAmount] = useState(1);
-  const [showVacToOT, setShowVacToOT] = useState(false);
-  const [vacToOTDays, setVacToOTDays] = useState(0.5);
+  const [showVacation, setShowVacation] = useState(false);
   const [vacFrom, setVacFrom] = useState(todayBerlin());
   const [vacTo, setVacTo] = useState(todayBerlin());
 
@@ -5193,12 +5115,6 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
                 {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : isWorkDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : 'Freier Tag — alles → Überstunden'}
               </text>
-              {work.clockedIn && !isPaused && isWorkDay && sessionMins < requiredMins && (
-                <text x="130" y="178" textAnchor="middle" fill="#e55353" fontSize="11">{`noch ${formatHM(requiredMins - sessionMins)}`}</text>
-              )}
-              {work.clockedIn && !isPaused && isWorkDay && sessionMins >= requiredMins && (
-                <text x="130" y="178" textAnchor="middle" fill="#4a9b6e" fontSize="11">Tagesziel erreicht ✓</text>
-              )}
             </>) : (<>
               <text x="130" y="125" textAnchor="middle" fill="white" fontSize="15">▶</text>
               <text x="130" y="148" textAnchor="middle" fill="#888" fontSize="13">Antippen zum Einstempeln</text>
@@ -5235,71 +5151,15 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
           )}
           <div className="flex justify-between text-xs text-inkDim px-1 items-center">
             <span>Überstundenkonto: <span className={work.overtimeMinutes >= 0 ? 'text-heal' : 'text-hp'}>{formatHM(work.overtimeMinutes||0)}</span></span>
-            <button onClick={() => { setBuyOTAmount(1); setShowBuyOT(true); }}
+            <button
+              onClick={() => onBuyOvertime()}
               disabled={profile.gold < 1}
               className="flex items-center gap-1 border border-gold/40 bg-gold/10 text-gold rounded-lg px-2 py-1 disabled:opacity-30 active:scale-95 text-[10px] font-semibold">
-              G → Min
+              1 G → 1 Min
             </button>
-            <span>Urlaub: <span className="text-[#c026d3]">{calcAvailableVacation(work).toFixed(1)} Tage</span>
-              {calcAvailableVacation(work) > 0 && (
-                <button onClick={() => { setVacToOTDays(0.5); setShowVacToOT(true); }}
-                  className="ml-1 text-[9px] border border-[#c026d3]/30 text-[#c026d3] rounded px-1 py-0.5 active:scale-95">→⏱</button>
-              )}
-            </span>
+            <span>Urlaub: <span className="text-gold">{calcAvailableVacation(work).toFixed(1)} Tage</span></span>
           </div>
         </div>
-
-        {/* Gold → Überstunden Popup */}
-        {showBuyOT && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
-              <div className="font-display font-bold text-gold">G → Überstunden kaufen</div>
-              <div className="text-xs text-inkDim">1 G = 1 Minute · Guthaben: {profile.gold} G</div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setBuyOTAmount(a => Math.max(1, a-1))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">−</button>
-                <input type="number" min={1} max={profile.gold} value={buyOTAmount}
-                  onChange={e => setBuyOTAmount(Math.max(1, Math.min(profile.gold, Number(e.target.value)||1)))}
-                  className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink text-center font-stat" />
-                <button onClick={() => setBuyOTAmount(a => Math.min(profile.gold, a+1))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">+</button>
-              </div>
-              <div className="text-xs text-center text-inkDim">{buyOTAmount} G → {formatHM(buyOTAmount)}</div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowBuyOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={() => { onBuyOvertime(buyOTAmount); setShowBuyOT(false); }}
-                  disabled={profile.gold < buyOTAmount}
-                  className="flex-1 bg-gold/20 border border-gold/50 text-gold disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold">
-                  Kaufen
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Urlaubstage → Überstunden */}
-        {showVacToOT && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
-              <div className="font-display font-bold text-[#c026d3]">🌴 → ⏱ Urlaub in Überstunden</div>
-              <div className="text-xs text-inkDim">Verfügbar: {calcAvailableVacation(work).toFixed(1)} Tage · 1 Tag = {formatHM((work.hoursPerDay||8)*60)}</div>
-              <div className="space-y-2">
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-inkDim w-16">Tage</span>
-                  <input type="number" min={0.5} max={calcAvailableVacation(work)} step={0.5} value={vacToOTDays}
-                    onChange={e => setVacToOTDays(Math.max(0.5, Math.min(calcAvailableVacation(work), Number(e.target.value)||0.5)))}
-                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink text-center font-stat" />
-                </div>
-                <div className="text-xs text-center text-inkDim">= {formatHM(vacToOTDays * (work.hoursPerDay||8) * 60)} Überstunden</div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowVacToOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={() => { onConvertVacToOT(vacToOTDays); setShowVacToOT(false); }}
-                  className="flex-1 bg-[#c026d3]/20 border border-[#c026d3]/50 text-[#c026d3] rounded-xl py-2.5 text-sm font-semibold">
-                  Umwandeln
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Krankmeldungs-Modal */}
         {showSick && (
@@ -5954,41 +5814,23 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     return () => ref.off('value', handler);
   }, []);
 
-  // Offline-First Lade-Strategie:
-  // 1. localStorage → sofortige Anzeige ohne Netzwerk
-  // 2. Firebase → lädt im Hintergrund, überschreibt bei Erfolg
-  // 3. Live-Abo → Partner-Änderungen in Echtzeit
+  // Initiales Laden + Live-Abo, sobald angemeldet. Eingehende Partner-Änderungen
+  // werden als "remote" markiert, damit sie nicht sofort wieder zurückgeschrieben werden.
+  // Mit keepSynced(true) liefert Firebase den lokalen Cache sofort — kein Spinner beim Öffnen.
   useEffect(() => {
     if (!authReady) return;
-
-    // 1. Sofort aus localStorage laden (synchron, kein Netzwerk nötig)
-    const localKey = `teamquest_local_${pairingCode}`;
-    try {
-      const cached = localStorage.getItem(localKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        isRemoteUpdate.current = true;
-        setState(migrateState(parsed) || initialState());
-        setLoading(false); // App ist sofort nutzbar
-      }
-    } catch (e) { /* ignorieren */ }
-
-    // 2. Firebase im Hintergrund laden
     let mounted = true;
+    // once('value') nutzt automatisch den lokalen Cache wenn vorhanden → sofortiger erster Wert
     Storage.ref(pairingCode).once('value').then(snap => {
       if (!mounted) return;
       const data = snap.exists() ? snap.val() : null;
-      const migrated = migrateState(data) || initialState();
       isRemoteUpdate.current = true;
-      setState(migrated);
-      try { localStorage.setItem(localKey, JSON.stringify(migrated)); } catch (e) {}
+      setState(migrateState(data) || initialState());
       setLoading(false);
     }).catch(() => {
       if (!mounted) return;
-      setLoading(false); // Auch ohne Firebase starten (Offline-Modus)
+      setLoading(false);
     });
-
-    // 3. Live-Abo für Partner-Änderungen
     const unsubscribe = Storage.subscribe(pairingCode, (data) => {
       const incoming = migrateState(data) || initialState();
       // Abgelaufene Fristen bereinigen
@@ -6003,11 +5845,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       isRemoteUpdate.current = true;
       setState(prev => {
         const localQuestsNewer = (prev.questsUpdatedAt || 0) > (incoming.questsUpdatedAt || 0);
-        const merged = localQuestsNewer
-          ? { ...incoming, quests: prev.quests, questCategories: prev.questCategories, questsUpdatedAt: prev.questsUpdatedAt }
-          : incoming;
-        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch (e) {}
-        return merged;
+        if (localQuestsNewer) {
+          return { ...incoming, quests: prev.quests, questCategories: prev.questCategories, questsUpdatedAt: prev.questsUpdatedAt };
+        }
+        return incoming;
       });
     });
     return () => { mounted = false; unsubscribe(); };
@@ -6019,9 +5860,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   useEffect(() => {
     if (loading) return;
     if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
-    // Lokal sofort speichern (Offline-Fallback)
-    try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(state)); } catch (e) {}
-    // Firebase im Hintergrund (queued wenn offline)
     Storage.save(pairingCode, state);
   }, [state]);
 
@@ -6249,7 +6087,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       if (!p.work.vacationDays) p.work.vacationDays = [];
-      const days = countWorkDays(from, to, p.work); // Feiertage automatisch raus
+      let days = 0;
+      let d = from;
+      while (d <= to) {
+        const dow = new Date(d + 'T00:00:00').getDay();
+        if ((p.work.workDays || [1,2,3,4,5]).includes(dow)) days++;
+        d = addDays(d, 1);
+      }
       const minutesNeeded = days * (p.work.hoursPerDay || 8) * 60;
       if (type === 'overtime') {
         if ((p.work.overtimeMinutes || 0) < minutesNeeded) return; // nicht genug Überstunden
@@ -6265,29 +6109,15 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
-  function handleBuyOvertime(amount = 1) {
+  function handleBuyOvertime() {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p || !p.work || (p.gold || 0) < amount) return;
-      p.gold -= amount;
-      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + amount;
-      addLog(s, `⏱ ${p.name}: ${amount} G → ${amount} Min Überstunden.`);
+      if (!p || !p.work || (p.gold || 0) < 1) return;
+      p.gold -= 1;
+      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + 1;
+      addLog(s, `⏱ ${p.name}: 1 G → 1 Min Überstunden gekauft.`);
     });
-    pushToast(`${amount} G → +${amount} Min Überstunden`, 'info');
-  }
-
-  function handleConvertVacToOT(days) {
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p || !p.work) return;
-      const avail = calcAvailableVacation(p.work);
-      if (days > avail) return;
-      const mins = Math.round(days * (p.work.hoursPerDay || 8) * 60);
-      p.work.vacationDaysUsed = (p.work.vacationDaysUsed || 0) + days;
-      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + mins;
-      addLog(s, `🌴→⏱ ${p.name}: ${days} Urlaubstag${days!==1?'e':''} → ${formatHM(mins)} Überstunden.`);
-    });
-    pushToast(`${days} Urlaubstag${days!==1?'e':''} → Überstunden`, 'info');
+    pushToast('1 G → +1 Min Überstunden', 'info');
   }
 
   function handleDeleteVacation(vacId) {
@@ -6825,7 +6655,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onAddVacation={handleAddVacation}
           onDeleteVacation={handleDeleteVacation}
           onBuyOvertime={handleBuyOvertime}
-          onConvertVacToOT={handleConvertVacToOT}
         />
       )}
 
@@ -6950,17 +6779,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               {calendarViewedDate === todayBerlin() ? `Tagesblick · Heute · ${formatShortDateWithYear(calendarViewedDate)}` : `Tagesblick · ${formatShortDateWithYear(calendarViewedDate)} ${weekdayLabelFor(calendarViewedDate)}`}
             </SectionLabel>
 
-            {/* Feiertag-Banner */}
-            {(activeProfile.work?.enabled) && rlpHolidayName(calendarViewedDate) && (
-              <div className="flex items-center gap-2 rounded-xl border border-orange/40 bg-orange/8 px-3 py-2 mb-2">
-                <span className="text-orange text-sm">✦</span>
-                <div>
-                  <div className="text-sm font-semibold text-orange">{rlpHolidayName(calendarViewedDate)}</div>
-                  <div className="text-[10px] text-inkDim">Gesetzlicher Feiertag · RLP</div>
-                </div>
-              </div>
-            )}
-
             {calendarViewedDate === todayBerlin() && allUpcomingDeadlines.length > 0 && (
               <div className="mb-3">
                 <DeadlineCarousel
@@ -7056,9 +6874,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>Geburtstag</span>
             )}
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-hp flex items-center justify-center text-[6px] text-white font-bold">!</span>Frist</span>
-            {(activeProfile.work?.enabled) && (
-              <span className="flex items-center gap-1"><span className="text-orange text-[8px]">✦</span>Feiertag (RLP)</span>
-            )}
           </div>
         </div>
       )}
