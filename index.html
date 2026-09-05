@@ -1456,16 +1456,13 @@ function rlpHolidayName(dateStr) {
   return map[dateStr] || null;
 }
 
-// Arbeitstage zählen — ohne Wochenenden UND RLP-Feiertage
+// Arbeitstage zählen — nur Wochenenden (laut workDays-Einstellung) raus
 function countWorkDays(from, to, work) {
   const workDays = work.workDays || [1,2,3,4,5];
-  const fromYear = parseInt(from.slice(0,4)), toYear = parseInt(to.slice(0,4));
-  const holidays = new Set();
-  for (let y = fromYear; y <= toYear; y++) rlpHolidaysForYear(y).forEach(h => holidays.add(h));
   let count = 0, d = from;
   while (d <= to) {
     const dow = new Date(d + 'T00:00:00').getDay();
-    if (workDays.includes(dow) && !holidays.has(d)) count++;
+    if (workDays.includes(dow)) count++;
     d = addDays(d, 1);
   }
   return count;
@@ -5337,14 +5334,8 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
 
         {/* Urlaubs-Modal */}
         {showVacation && (() => {
-          // Arbeitstage im gewählten Zeitraum berechnen (live Preview)
-          let previewDays = 0;
-          let pd = vacFrom;
-          while (pd <= vacTo) {
-            const dow = new Date(pd + 'T00:00:00').getDay();
-            if ((work.workDays || [1,2,3,4,5]).includes(dow)) previewDays++;
-            pd = addDays(pd, 1);
-          }
+          // Arbeitstage (ohne Feiertage) — identisch mit dem was beim Eintragen abgezogen wird
+          const previewDays = countWorkDays(vacFrom, vacTo, work);
           const minutesNeeded = previewDays * (work.hoursPerDay || 8) * 60;
           const canUseOvertime = (work.overtimeMinutes || 0) >= minutesNeeded;
           const availableVac = calcAvailableVacation(work);
