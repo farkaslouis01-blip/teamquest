@@ -1487,15 +1487,6 @@ function isSickToday(work) {
   return (work.sickDays || []).some(s => s.from <= today && today <= s.to);
 }
 
-function calcPenaltyMinutes(work) {
-  if (isSickToday(work)) return 0;
-  const [sh, sm] = (work.startTime || '09:30').split(':').map(Number);
-  const now = new Date();
-  const late = (now.getHours() * 60 + now.getMinutes()) - (sh * 60 + sm);
-  // Erste 30 Min Verspätung = Puffer, danach 1:1 Strafminuten, max. 30 Min
-  return Math.min(30, Math.max(0, late - 30));
-}
-
 function calcProRatedVacation(work) {
   const total = work.vacationDaysPerYear || 30;
   const start = work.startDate;
@@ -5028,6 +5019,17 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
    ARBEITSZEITERFASSUNG — Komponenten
    ============================================================ */
 
+// Hook: Android-Zurück-Taste für Modals abfangen.
+function useBackButton(isOpen, onClose) {
+  useEffect(() => {
+    if (!isOpen) return;
+    history.pushState({ modal: true }, '');
+    const handler = e => { onClose(); };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [isOpen]);
+}
+
 const WEEK_DAYS = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 
 function WorkSettings({ work, onChange }) {
@@ -5036,6 +5038,8 @@ function WorkSettings({ work, onChange }) {
     const days = work.workDays || [1,2,3,4,5];
     set('workDays', days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort());
   }
+  const [hoursStr, setHoursStr] = useState(String(work.hoursPerDay ?? 8));
+  const [vacStr, setVacStr] = useState(String(work.vacationDaysPerYear ?? 30));
   return (
     <div className="space-y-4">
       <div>
@@ -5055,8 +5059,13 @@ function WorkSettings({ work, onChange }) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <div className="text-xs text-inkDim mb-1.5">Stunden/Tag</div>
-          <input type="number" min={1} max={24} value={work.hoursPerDay||8}
-            onChange={e => set('hoursPerDay', Number(e.target.value))}
+          <input type="text" inputMode="numeric" value={hoursStr}
+            onChange={e => setHoursStr(e.target.value)}
+            onBlur={() => {
+              const v = parseInt(hoursStr);
+              if (!isNaN(v) && v > 0) set('hoursPerDay', v);
+              setHoursStr(String(isNaN(v) || v <= 0 ? (work.hoursPerDay ?? 8) : v));
+            }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
         </div>
         <div>
@@ -5067,8 +5076,13 @@ function WorkSettings({ work, onChange }) {
         </div>
         <div>
           <div className="text-xs text-inkDim mb-1.5">Urlaubstage/Jahr</div>
-          <input type="number" min={0} max={60} value={work.vacationDaysPerYear||30}
-            onChange={e => set('vacationDaysPerYear', Number(e.target.value))}
+          <input type="text" inputMode="numeric" value={vacStr}
+            onChange={e => setVacStr(e.target.value)}
+            onBlur={() => {
+              const v = parseInt(vacStr);
+              if (!isNaN(v) && v >= 0) set('vacationDaysPerYear', v);
+              setVacStr(String(isNaN(v) || v < 0 ? (work.vacationDaysPerYear ?? 30) : v));
+            }}
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
         </div>
         <div>
@@ -5078,70 +5092,65 @@ function WorkSettings({ work, onChange }) {
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
         </div>
       </div>
-      <div>
-        <div className="text-xs text-inkDim mb-1.5">Max. Überstunden/Tag (Min)</div>
-        <input type="number" min={0} max={240} value={work.maxOvertimePerDay??90}
-          onChange={e => set('maxOvertimePerDay', Number(e.target.value))}
-          className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
-      </div>
     </div>
   );
 }
 
 function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT }) {
   const work = profile.work || {};
+
+  // ---- alle Hooks zuerst ----
   const [tick, setTick] = useState(0);
   const [showSick, setShowSick] = useState(false);
   const [sickFrom, setSickFrom] = useState(todayBerlin());
   const [sickTo, setSickTo] = useState(todayBerlin());
   const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [showBuyOT, setShowBuyOT] = useState(false);
+  const [buyOTAmount, setBuyOTAmount] = useState('1');
+  const [showVacToOT, setShowVacToOT] = useState(false);
+  const [vacToOTDays, setVacToOTDays] = useState('0.5');
+  const [showVacation, setShowVacation] = useState(false);
+  const [vacFrom, setVacFrom] = useState(todayBerlin());
+  const [vacTo, setVacTo] = useState(todayBerlin());
 
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(iv);
   }, []);
 
+  useBackButton(showBuyOT, () => setShowBuyOT(false));
+  useBackButton(showVacToOT, () => setShowVacToOT(false));
+  useBackButton(showVacation, () => setShowVacation(false));
+  useBackButton(showSick, () => setShowSick(false));
+  useBackButton(showStopConfirm, () => setShowStopConfirm(false));
+
+  // ---- berechnete Werte ----
   const sessionMins = calcCurrentSessionMinutes(work);
   const isWorkDay = isWorkDayToday(work);
-  const requiredMins = isWorkDay ? (work.hoursPerDay || 8) * 60 + (work.penaltyMinutesToday || 0) : 0;
+  const requiredMins = isWorkDay ? (work.hoursPerDay || 8) * 60 : 0;
   const isPaused = !!work.pauseStart;
   const isSick = isSickToday(work);
-  const penalty = isWorkDay ? calcPenaltyMinutes(work) : 0;
 
   const displayMins = Math.floor(sessionMins % 60);
   const displayHrs = Math.floor(sessionMins / 60);
   const displaySecs = Math.floor((sessionMins * 60) % 60);
-  // Kein Tagesziel an Nicht-Arbeitstagen → Ring zeigt Fortschritt zum Max-Überstunden-Limit
-  const maxOT = work.maxOvertimePerDay ?? 90;
   const progress = requiredMins > 0
     ? Math.min(1, sessionMins / requiredMins)
-    : Math.min(1, sessionMins / maxOT);
+    : Math.min(1, sessionMins / 480);
   const progressColor = requiredMins > 0
     ? (sessionMins < requiredMins ? '#d4a843' : '#4a9b6e')
-    : '#4a9b6e'; // immer grün an freien Tagen
+    : '#4a9b6e';
 
   const R = 110, STROKE = 14, C = 2 * Math.PI * R;
   const dashOffset = C * (1 - progress);
-
-  const [showBuyOT, setShowBuyOT] = useState(false);
-  const [buyOTAmount, setBuyOTAmount] = useState(1);
-  const [showVacToOT, setShowVacToOT] = useState(false);
-  const [vacToOTDays, setVacToOTDays] = useState(0.5);
-  const [showVacation, setShowVacation] = useState(false);
-  const [vacFrom, setVacFrom] = useState(todayBerlin());
-  const [vacTo, setVacTo] = useState(todayBerlin());
-
-  // Vor Anstellungsdatum: nicht einstempeln erlauben
   const notStartedYet = work.startDate && todayBerlin() < work.startDate;
 
   function handleStop() {
     const workedMins = sessionMins;
     const reqMins = requiredMins;
-    const raw = workedMins - reqMins;
-    const max = work.maxOvertimePerDay ?? 90;
-    const overtime = Math.min(Math.max(0, raw), max);
-    const deficit = raw < 0 ? raw : 0;
-    onClockOut({ workedMins, reqMins, overtimeDelta: overtime + deficit });
+    // Überstunden = gearbeitet − Soll (kann negativ sein), an freien Tagen alles Überstunden
+    const overtimeDelta = workedMins - reqMins;
+    onClockOut({ workedMins, reqMins, overtimeDelta });
   }
 
   return (
@@ -5204,11 +5213,6 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
             </>) : (<>
               <text x="130" y="125" textAnchor="middle" fill="white" fontSize="15">▶</text>
               <text x="130" y="148" textAnchor="middle" fill="#888" fontSize="13">Antippen zum Einstempeln</text>
-              {penalty > 0 && !isSick && !showStopConfirm && (
-                <text x="130" y="170" textAnchor="middle" fill="#e55353" fontSize="11">
-                  ⚠ {penalty} Min Strafe bei Start jetzt
-                </text>
-              )}
             </>)}
           </svg>
         </div>
@@ -5258,17 +5262,17 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <div className="font-display font-bold text-gold">G → Überstunden kaufen</div>
               <div className="text-xs text-inkDim">1 G = 1 Minute · Guthaben: {profile.gold} G</div>
               <div className="flex items-center gap-3">
-                <button onClick={() => setBuyOTAmount(a => Math.max(1, a-1))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">−</button>
-                <input type="number" min={1} max={profile.gold} value={buyOTAmount}
-                  onChange={e => setBuyOTAmount(Math.max(1, Math.min(profile.gold, Number(e.target.value)||1)))}
+                <button onClick={() => setBuyOTAmount(a => String(Math.max(1, (parseInt(a)||1)-1)))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">−</button>
+                <input type="text" inputMode="numeric" value={buyOTAmount}
+                  onChange={e => setBuyOTAmount(e.target.value)}
                   className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink text-center font-stat" />
-                <button onClick={() => setBuyOTAmount(a => Math.min(profile.gold, a+1))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">+</button>
+                <button onClick={() => setBuyOTAmount(a => String(Math.min(profile.gold, (parseInt(a)||0)+1)))} className="w-9 h-9 rounded-xl border border-border text-ink text-lg active:scale-95">+</button>
               </div>
-              <div className="text-xs text-center text-inkDim">{buyOTAmount} G → {formatHM(buyOTAmount)}</div>
+              <div className="text-xs text-center text-inkDim">{buyOTAmount} G → {parseInt(buyOTAmount) > 0 ? formatHM(parseInt(buyOTAmount)) : "–"}</div>
               <div className="flex gap-2">
                 <button onClick={() => setShowBuyOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={() => { onBuyOvertime(buyOTAmount); setShowBuyOT(false); }}
-                  disabled={profile.gold < buyOTAmount}
+                <button onClick={() => { const n = parseInt(buyOTAmount); if (n > 0) { onBuyOvertime(n); setShowBuyOT(false); } }}
+                  disabled={profile.gold < (parseInt(buyOTAmount)||0) || (parseInt(buyOTAmount)||0) < 1}
                   className="flex-1 bg-gold/20 border border-gold/50 text-gold disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold">
                   Kaufen
                 </button>
@@ -5286,15 +5290,15 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <div className="space-y-2">
                 <div className="flex gap-2 items-center">
                   <span className="text-xs text-inkDim w-16">Tage</span>
-                  <input type="number" min={0.5} max={calcAvailableVacation(work)} step={0.5} value={vacToOTDays}
-                    onChange={e => setVacToOTDays(Math.max(0.5, Math.min(calcAvailableVacation(work), Number(e.target.value)||0.5)))}
+                  <input type="text" inputMode="decimal" value={vacToOTDays}
+                    onChange={e => setVacToOTDays(e.target.value)}
                     className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink text-center font-stat" />
                 </div>
-                <div className="text-xs text-center text-inkDim">= {formatHM(vacToOTDays * (work.hoursPerDay||8) * 60)} Überstunden</div>
+                <div className="text-xs text-center text-inkDim">= {parseFloat(vacToOTDays) > 0 ? formatHM(parseFloat(vacToOTDays) * (work.hoursPerDay||8) * 60) : "–"} Überstunden</div>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowVacToOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={() => { onConvertVacToOT(vacToOTDays); setShowVacToOT(false); }}
+                <button onClick={() => { const n = parseFloat(vacToOTDays); if (n > 0) { onConvertVacToOT(n); setShowVacToOT(false); } }}
                   className="flex-1 bg-[#c026d3]/20 border border-[#c026d3]/50 text-[#c026d3] rounded-xl py-2.5 text-sm font-semibold">
                   Umwandeln
                 </button>
@@ -5420,14 +5424,11 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <div className="font-display font-bold text-gold">Ausstempeln</div>
               <div className="text-sm text-ink space-y-1">
                 <div>Gearbeitet: <span className="font-stat text-heal">{formatHM(sessionMins)}</span></div>
-                <div>Tagesziel: <span className="font-stat">{formatHM(requiredMins)}</span>
-                  {(work.penaltyMinutesToday||0) > 0 && <span className="text-xs text-hp ml-1">(inkl. {work.penaltyMinutesToday} Min Strafe)</span>}
-                </div>
+                {requiredMins > 0 && <div>Tagesziel: <span className="font-stat">{formatHM(requiredMins)}</span></div>}
                 {(() => {
-                  const raw = sessionMins - requiredMins;
-                  const max = work.maxOvertimePerDay ?? 90;
-                  if (raw > 0) return <div>Überstunden: <span className="font-stat text-heal">+{formatHM(Math.min(raw, max))}</span>{raw > max ? <span className="text-inkDim text-xs"> (max. {max} Min angerechnet)</span> : ''}</div>;
-                  if (raw < 0) return <div>Fehlzeit: <span className="font-stat text-hp">{formatHM(raw)}</span></div>;
+                  const delta = sessionMins - requiredMins;
+                  if (delta > 0) return <div>Überstunden: <span className="font-stat text-heal">+{formatHM(delta)}</span></div>;
+                  if (delta < 0) return <div>Fehlzeit: <span className="font-stat text-hp">{formatHM(delta)}</span></div>;
                   return <div className="text-heal">Genau pünktlich! ✓</div>;
                 })()}
               </div>
@@ -6202,16 +6203,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
-      // Immer frisch starten — alte Session-Daten verwerfen
-      const penalty = calcPenaltyMinutes(p.work);
       p.work.clockedIn = true;
       p.work.sessionStart = Date.now();
       p.work.pauseStart = null;
       p.work.pausedMinutesToday = 0;
       p.work.sessionDate = todayBerlin();
-      p.work.penaltyMinutesToday = penalty;
-      if (penalty > 0) addLog(s, `🕐 ${p.name} eingestempelt — ${penalty} Min Strafe (${formatTimeHHMM(Date.now())} Uhr).`);
-      else addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
+      p.work.penaltyMinutesToday = 0;
+      addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
     });
   }
 
@@ -6248,7 +6246,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         workedMinutes: Math.round(workedMins),
         requiredMinutes: Math.round(reqMins),
         overtimeDelta: Math.round(overtimeDelta),
-        penaltyMinutes: p.work.penaltyMinutesToday || 0,
       });
       p.work.clockedIn = false;
       p.work.sessionStart = null;
