@@ -6063,13 +6063,17 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // setzt ihn und gibt ihn synchron zurück — so können Aufrufer sofort mit dem
   // neuen Stand weiterarbeiten, ohne auf den asynchronen React-Re-Render zu warten.
   function update(mutator) {
-    let result;
+    let next;
     setState(prev => {
-      const next = JSON.parse(JSON.stringify(prev));
-      result = mutator(next);
+      next = JSON.parse(JSON.stringify(prev));
+      mutator(next);
       return next;
     });
-    return result;
+    // Sofort synchron in localStorage schreiben — nicht auf useEffect warten.
+    // Verhindert Datenverlust wenn die App direkt nach einer Aktion geschlossen wird.
+    if (next) {
+      try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(next)); } catch (e) {}
+    }
   }
 
   const activeProfile = state.profiles.find(p => p.id === activeProfileId) || null;
@@ -6202,6 +6206,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.penaltyMinutesToday = 0;
       addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
     });
+    // Sofort zu Firebase — nicht auf useEffect warten
+    setTimeout(() => Storage.save(pairingCode, state), 0);
   }
 
   function handleWorkPause() {
@@ -6248,6 +6254,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
     setWorkScreenOpen(false);
     setFreizeitScreenOpen(false);
+    setTimeout(() => Storage.save(pairingCode, state), 0);
   }
 
   function handleAddSickDay(from, to) {
