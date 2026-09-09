@@ -5093,7 +5093,7 @@ function WorkSettings({ work, onChange }) {
   );
 }
 
-function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT }) {
+function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
   const work = profile.work || {};
 
   // ---- alle Hooks zuerst ----
@@ -5115,7 +5115,10 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
     return () => clearInterval(iv);
   }, []);
 
-  useBackButton(showBuyOT, () => setShowBuyOT(false));
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetConfirmMsg, setResetConfirmMsg] = useState('');
+
+  useBackButton(showResetConfirm, () => setShowResetConfirm(false));
   useBackButton(showVacToOT, () => setShowVacToOT(false));
   useBackButton(showVacation, () => setShowVacation(false));
   useBackButton(showSick, () => setShowSick(false));
@@ -5170,7 +5173,21 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               </button>
             </div>
           </div>
-          <div style={{ width: 60 }} />
+          <div style={{ width: 60 }} className="flex justify-end">
+            <button onClick={() => {
+                const today = new Date().toISOString().slice(0,10);
+                const todayLogs = (work.workLog||[]).filter(e=>e.date===today&&e.type==='work');
+                if (!work.clockedIn && todayLogs.length===0) { onReset('none'); return; }
+                const msg = work.clockedIn
+                  ? 'Laufenden Timer zurücksetzen? Die bisherige Zeit wird nicht gebucht.'
+                  : `Heutigen Arbeitstag zurücksetzen?\n${todayLogs.map(e=>`${e.clockIn}–${e.clockOut} (${e.overtimeDelta>=0?'+':''}${Math.round(e.overtimeDelta)} Min)`).join(', ')} wird rückgängig gemacht.`;
+                setResetConfirmMsg(msg);
+                setShowResetConfirm(true);
+              }}
+              className="text-xs text-hp border border-hp/30 rounded-lg px-2 py-1 active:scale-95">
+              ↺ Reset
+            </button>
+          </div>
         </div>
 
         {/* Ring */}
@@ -5298,6 +5315,26 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
                 <button onClick={() => { const n = parseFloat(vacToOTDays); if (n > 0) { onConvertVacToOT(n); setShowVacToOT(false); } }}
                   className="flex-1 bg-[#c026d3]/20 border border-[#c026d3]/50 text-[#c026d3] rounded-xl py-2.5 text-sm font-semibold">
                   Umwandeln
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Reset-Bestätigung */}
+        {showResetConfirm && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 px-4">
+            <div className="w-full max-w-sm bg-bgElevated border border-hp/40 rounded-2xl p-5 space-y-4">
+              <div className="font-display font-bold text-hp">⚠️ Arbeitstag zurücksetzen</div>
+              <div className="text-sm text-ink leading-relaxed whitespace-pre-line">{resetConfirmMsg}</div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowResetConfirm(false)}
+                  className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim active:scale-95">
+                  Abbrechen
+                </button>
+                <button onClick={() => { setShowResetConfirm(false); onReset('confirmed'); }}
+                  className="flex-1 bg-hp/20 border border-hp/50 text-hp rounded-xl py-2.5 text-sm font-semibold active:scale-95">
+                  Zurücksetzen
                 </button>
               </div>
             </div>
@@ -5829,6 +5866,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [authReady, setAuthReady] = useState(false);
   const [connStatus, setConnStatus] = useState('connecting');
   const isRemoteUpdate = useRef(false);
+  const activeProfileIdRef = useRef(null); // für Closures in subscribe-Callback
   const [activeTab, setActiveTab] = useState('kalender');
   const [toasts, setToasts] = useState([]);
   const [editingProfile, setEditingProfile] = useState(null);
@@ -5864,6 +5902,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   useEffect(() => {
     if (activeProfileId) localStorage.setItem(ACTIVE_PROFILE_KEY, activeProfileId);
     else localStorage.removeItem(ACTIVE_PROFILE_KEY);
+    activeProfileIdRef.current = activeProfileId;
   }, [activeProfileId]);
 
   // Kurze Animation, sobald sich die Streak für das aktuell angezeigte Profil erhöht.
@@ -5889,14 +5928,20 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   useEffect(() => {
     if (loading) return;
     const today = todayBerlin();
-    const hasStale = state.profiles.some(p =>
-      p.work?.clockedIn && p.work?.sessionDate && p.work.sessionDate !== today
-    );
+    const hasStale = state.profiles.some(p => {
+      if (!p.work?.clockedIn) return false;
+      const wrongDay = p.work?.sessionDate && p.work.sessionDate !== today;
+      const tooOld = p.work?.sessionStart && (Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000;
+      return wrongDay || tooOld;
+    });
     if (!hasStale) return;
     update(s => {
       s.profiles.forEach(p => {
-        if (p.work?.clockedIn && p.work?.sessionDate && p.work.sessionDate !== today) {
-          const oldDate = p.work.sessionDate;
+        if (!p.work?.clockedIn) return;
+        const wrongDay = p.work?.sessionDate && p.work.sessionDate !== today;
+        const tooOld = p.work?.sessionStart && (Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000;
+        if (wrongDay || tooOld) {
+          const oldDate = p.work.sessionDate || '?';
           p.work.clockedIn = false;
           p.work.sessionStart = null;
           p.work.pauseStart = null;
@@ -5974,26 +6019,16 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }, []);
 
   // Offline-First Lade-Strategie:
-  // 1. localStorage → sofortige Anzeige ohne Netzwerk
-  // 2. Firebase → lädt im Hintergrund, überschreibt bei Erfolg
-  // 3. Live-Abo → Partner-Änderungen in Echtzeit
+  // 1. Firebase lädt (Ladescreen bleibt bis Antwort)
+  // 2. Fallback auf localStorage wenn Firebase nicht erreichbar
+  // 3. Live-Abo hält Partneränderungen aktuell, schützt aber eigene Arbeitsdaten
   useEffect(() => {
     if (!authReady) return;
-
-    // 1. Sofort aus localStorage laden (synchron, kein Netzwerk nötig)
-    const localKey = `teamquest_local_${pairingCode}`;
-    try {
-      const cached = localStorage.getItem(localKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        isRemoteUpdate.current = true;
-        setState(migrateState(parsed) || initialState());
-        setLoading(false); // App ist sofort nutzbar
-      }
-    } catch (e) { /* ignorieren */ }
-
-    // 2. Firebase im Hintergrund laden
     let mounted = true;
+
+    const localKey = `teamquest_local_${pairingCode}`;
+
+    // Firebase laden (Ladescreen bis Antwort)
     Storage.ref(pairingCode).once('value').then(snap => {
       if (!mounted) return;
       const data = snap.exists() ? snap.val() : null;
@@ -6004,13 +6039,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       setLoading(false);
     }).catch(() => {
       if (!mounted) return;
-      setLoading(false); // Auch ohne Firebase starten (Offline-Modus)
+      // Firebase nicht erreichbar → localStorage-Fallback
+      try {
+        const cached = localStorage.getItem(localKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          isRemoteUpdate.current = true;
+          setState(migrateState(parsed) || initialState());
+        }
+      } catch (e) {}
+      setLoading(false);
     });
 
-    // 3. Live-Abo für Partner-Änderungen
+    // Live-Abo für Partneränderungen
     const unsubscribe = Storage.subscribe(pairingCode, (data) => {
       const incoming = migrateState(data) || initialState();
-      // Abgelaufene Fristen bereinigen
       const today = todayBerlin();
       incoming.profiles.forEach(p => {
         if (!p.questDeadlines) return;
@@ -6021,10 +6064,37 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       });
       isRemoteUpdate.current = true;
       setState(prev => {
-        const localQuestsNewer = (prev.questsUpdatedAt || 0) > (incoming.questsUpdatedAt || 0);
-        const merged = localQuestsNewer
-          ? { ...incoming, quests: prev.quests, questCategories: prev.questCategories, questsUpdatedAt: prev.questsUpdatedAt }
-          : incoming;
+        // Eigenes Profil: Arbeitsdaten aus lokalem Stand behalten
+        // (verhindert dass Partnersync laufenden Timer oder Überstunden überschreibt)
+        const ownId = activeProfileIdRef.current;
+        const mergedProfiles = incoming.profiles.map(inP => {
+          const prevP = prev.profiles.find(p => p.id === inP.id);
+          if (!prevP) return inP;
+          if (inP.id === ownId && prevP.work) {
+            return { ...inP, work: {
+              ...inP.work,
+              clockedIn: prevP.work.clockedIn,
+              sessionStart: prevP.work.sessionStart,
+              sessionDate: prevP.work.sessionDate,
+              pauseStart: prevP.work.pauseStart,
+              pausedMinutesToday: prevP.work.pausedMinutesToday,
+              penaltyMinutesToday: prevP.work.penaltyMinutesToday,
+              overtimeMinutes: prevP.work.overtimeMinutes,
+              workLog: prevP.work.workLog,
+              vacationDays: prevP.work.vacationDays,
+              vacationDaysUsed: prevP.work.vacationDaysUsed,
+              sickDays: prevP.work.sickDays,
+            }};
+          }
+          return inP;
+        });
+        const merged = { ...incoming, profiles: mergedProfiles };
+        // Quest-Konflikt-Auflösung
+        if ((prev.questsUpdatedAt || 0) > (incoming.questsUpdatedAt || 0)) {
+          merged.quests = prev.quests;
+          merged.questCategories = prev.questCategories;
+          merged.questsUpdatedAt = prev.questsUpdatedAt;
+        }
         try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch (e) {}
         return merged;
       });
@@ -6038,10 +6108,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   useEffect(() => {
     if (loading) return;
     if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
-    // Lokal sofort speichern (Offline-Fallback)
+    // Backup: localStorage aktuell halten für Offline-Fallback.
+    // Firebase wird bereits in update() direkt beschrieben.
     try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(state)); } catch (e) {}
-    // Firebase im Hintergrund (queued wenn offline)
-    Storage.save(pairingCode, state);
   }, [state]);
 
   // Team-HP initialisieren sobald mind. ein Profil vorhanden und teamHp noch null.
@@ -6069,10 +6138,11 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       mutator(next);
       return next;
     });
-    // Sofort synchron in localStorage schreiben — nicht auf useEffect warten.
-    // Verhindert Datenverlust wenn die App direkt nach einer Aktion geschlossen wird.
+    // Sofort synchron speichern — BEVOR React re-rendert.
+    // Wichtig: next enthält den gemuteten State, nicht das alte state-Closure.
     if (next) {
       try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(next)); } catch (e) {}
+      Storage.save(pairingCode, next);
     }
   }
 
@@ -6194,6 +6264,30 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
+  function handleWorkReset(mode) {
+    if (mode === 'none') { pushToast('Kein Eintrag für heute vorhanden.', 'info'); return; }
+    const today = todayBerlin();
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      if (p.work.clockedIn) {
+        p.work.clockedIn = false;
+        p.work.sessionStart = null;
+        p.work.pauseStart = null;
+        p.work.pausedMinutesToday = 0;
+        p.work.penaltyMinutesToday = 0;
+        p.work.sessionDate = null;
+      }
+      const logs = (p.work.workLog || []).filter(e => e.date === today && e.type === 'work');
+      logs.forEach(e => {
+        p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - (e.overtimeDelta || 0);
+      });
+      p.work.workLog = (p.work.workLog || []).filter(e => !(e.date === today && e.type === 'work'));
+      addLog(s, `🔄 ${p.name}: Arbeitstag ${today} zurückgesetzt.`);
+    });
+    pushToast('Arbeitstag zurückgesetzt.', 'info');
+  }
+
   function handleWorkClockIn() {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
@@ -6206,8 +6300,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.penaltyMinutesToday = 0;
       addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
     });
-    // Sofort zu Firebase — nicht auf useEffect warten
-    setTimeout(() => Storage.save(pairingCode, state), 0);
   }
 
   function handleWorkPause() {
@@ -6254,7 +6346,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
     setWorkScreenOpen(false);
     setFreizeitScreenOpen(false);
-    setTimeout(() => Storage.save(pairingCode, state), 0);
   }
 
   function handleAddSickDay(from, to) {
@@ -6849,6 +6940,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onDeleteVacation={handleDeleteVacation}
           onBuyOvertime={handleBuyOvertime}
           onConvertVacToOT={handleConvertVacToOT}
+          onReset={handleWorkReset}
         />
       )}
 
