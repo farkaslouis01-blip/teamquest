@@ -5131,14 +5131,18 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   const isPaused = !!work.pauseStart;
   const isSick = isSickToday(work);
 
-  const displayMins = Math.floor(sessionMins % 60);
-  const displayHrs = Math.floor(sessionMins / 60);
-  const displaySecs = Math.floor((sessionMins * 60) % 60);
+  // Gesamt-Tagesleistung = frühere Sitzungen + aktuelle Sitzung
+  const workedBefore = work.workedMinutesToday || 0;
+  const totalWorkedToday = sessionMins + workedBefore;
+
+  const displayMins = Math.floor(totalWorkedToday % 60);
+  const displayHrs = Math.floor(totalWorkedToday / 60);
+  const displaySecs = Math.floor((sessionMins * 60) % 60); // Sekunden aus aktueller Sitzung
   const progress = requiredMins > 0
-    ? Math.min(1, sessionMins / requiredMins)
+    ? Math.min(1, totalWorkedToday / requiredMins)
     : Math.min(1, sessionMins / 480);
   const progressColor = requiredMins > 0
-    ? (sessionMins < requiredMins ? '#d4a843' : '#4a9b6e')
+    ? (totalWorkedToday < requiredMins ? '#d4a843' : '#4a9b6e')
     : '#4a9b6e';
 
   const R = 110, STROKE = 14, C = 2 * Math.PI * R;
@@ -5146,11 +5150,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   const notStartedYet = work.startDate && todayBerlin() < work.startDate;
 
   function handleStop() {
-    const workedMins = sessionMins;
-    const reqMins = requiredMins;
-    // Überstunden = gearbeitet − Soll (kann negativ sein), an freien Tagen alles Überstunden
-    const overtimeDelta = workedMins - reqMins;
-    onClockOut({ workedMins, reqMins, overtimeDelta });
+    onClockOut({ sessionMins, reqMins: requiredMins });
   }
 
   return (
@@ -5218,10 +5218,10 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
                 {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : isWorkDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : 'Freier Tag — alles → Überstunden'}
               </text>
-              {work.clockedIn && !isPaused && isWorkDay && sessionMins < requiredMins && (
-                <text x="130" y="178" textAnchor="middle" fill="#e55353" fontSize="11">{`noch ${formatHM(requiredMins - sessionMins)}`}</text>
+              {work.clockedIn && !isPaused && isWorkDay && totalWorkedToday < requiredMins && (
+                <text x="130" y="178" textAnchor="middle" fill="#e55353" fontSize="11">{`noch ${formatHM(requiredMins - totalWorkedToday)}`}</text>
               )}
-              {work.clockedIn && !isPaused && isWorkDay && sessionMins >= requiredMins && (
+              {work.clockedIn && !isPaused && isWorkDay && totalWorkedToday >= requiredMins && (
                 <text x="130" y="178" textAnchor="middle" fill="#4a9b6e" fontSize="11">Tagesziel erreicht ✓</text>
               )}
             </>) : (<>
@@ -5451,10 +5451,12 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
             <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-3">
               <div className="font-display font-bold text-gold">Ausstempeln</div>
               <div className="text-sm text-ink space-y-1">
-                <div>Gearbeitet: <span className="font-stat text-heal">{formatHM(sessionMins)}</span></div>
+                <div>Heute gesamt: <span className="font-stat text-heal">{formatHM(totalWorkedToday)}</span>
+                  {workedBefore > 0 && <span className="text-xs text-inkDim ml-1">(inkl. {formatHM(workedBefore)} früher)</span>}
+                </div>
                 {requiredMins > 0 && <div>Tagesziel: <span className="font-stat">{formatHM(requiredMins)}</span></div>}
                 {(() => {
-                  const delta = sessionMins - requiredMins;
+                  const delta = totalWorkedToday - requiredMins;
                   if (delta > 0) return <div>Überstunden: <span className="font-stat text-heal">+{formatHM(delta)}</span></div>;
                   if (delta < 0) return <div>Fehlzeit: <span className="font-stat text-hp">{formatHM(delta)}</span></div>;
                   return <div className="text-heal">Genau pünktlich! ✓</div>;
@@ -6292,13 +6294,22 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
+      const today = todayBerlin();
+      // Bereits heute gebuchte Minuten + Überstunden zurücklesen
+      const todayLogs = (p.work.workLog || []).filter(e => e.date === today && e.type === 'work');
+      const alreadyWorked = todayLogs.reduce((sum, e) => sum + (e.workedMinutes || 0), 0);
+      const alreadyBooked = todayLogs.reduce((sum, e) => sum + (e.overtimeDelta || 0), 0);
+      // Gebuchtes zurücknehmen — wird beim Ausstempeln als Gesamt-Tageseintrag neu berechnet
+      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - alreadyBooked;
+      p.work.workLog = (p.work.workLog || []).filter(e => !(e.date === today && e.type === 'work'));
       p.work.clockedIn = true;
       p.work.sessionStart = Date.now();
       p.work.pauseStart = null;
       p.work.pausedMinutesToday = 0;
-      p.work.sessionDate = todayBerlin();
       p.work.penaltyMinutesToday = 0;
-      addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr).`);
+      p.work.sessionDate = today;
+      p.work.workedMinutesToday = alreadyWorked;
+      addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr)${alreadyWorked > 0 ? ` — bereits ${formatHM(alreadyWorked)} heute geleistet` : ''}.`);
     });
   }
 
@@ -6319,12 +6330,15 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
-  function handleWorkClockOut({ workedMins, reqMins, overtimeDelta }) {
+  function handleWorkClockOut({ sessionMins, reqMins }) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       const clockIn = formatTimeHHMM(p.work.sessionStart);
       const clockOut = formatTimeHHMM(Date.now());
+      // Gesamt-Tagesleistung = bisherige Sitzungen + aktuelle Sitzung
+      const totalWorked = Math.round(sessionMins + (p.work.workedMinutesToday || 0));
+      const overtimeDelta = totalWorked - Math.round(reqMins);
       p.work.overtimeMinutes = (p.work.overtimeMinutes||0) + overtimeDelta;
       if (!p.work.workLog) p.work.workLog = [];
       p.work.workLog.push({
@@ -6332,9 +6346,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         type: 'work',
         clockIn,
         clockOut,
-        workedMinutes: Math.round(workedMins),
+        workedMinutes: totalWorked,
         requiredMinutes: Math.round(reqMins),
-        overtimeDelta: Math.round(overtimeDelta),
+        overtimeDelta,
       });
       p.work.clockedIn = false;
       p.work.sessionStart = null;
@@ -6342,7 +6356,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.pausedMinutesToday = 0;
       p.work.penaltyMinutesToday = 0;
       p.work.sessionDate = null;
-      addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(workedMins)} gearbeitet, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
+      p.work.workedMinutesToday = 0;
+      addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(totalWorked)} heute gesamt, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
     });
     setWorkScreenOpen(false);
     setFreizeitScreenOpen(false);
