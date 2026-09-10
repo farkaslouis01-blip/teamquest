@@ -574,7 +574,6 @@ function freshProfile(overrides) {
       startTime: '09:30',        // Spätester Beginn ohne Strafe (HH:MM)
       vacationDaysPerYear: 30,   // Urlaubstage laut Vertrag
       startDate: null,           // 'YYYY-MM-DD' — Anstellungsbeginn (für anteilige Berechnung)
-      maxOvertimePerDay: 90,     // Max. anrechenbare Überstunden pro Tag in Minuten
       // Konten
       overtimeMinutes: 0,        // Gesamtes Überstundenkonto in Minuten
       vacationDaysUsed: 0,       // Genutzte Urlaubstage (kann Dezimalzahl sein)
@@ -587,6 +586,7 @@ function freshProfile(overrides) {
       sessionDate: null,         // 'YYYY-MM-DD' — Datum der laufenden Session
       // Krankmeldungen + Log
       sickDays: [],              // [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', note: '' }]
+      absenceCheckedUntil: null, // bis zu diesem Datum wurden Fehltage bereits geprüft
       workLog: [],               // [{ date, type, clockIn, clockOut, workedMinutes, requiredMinutes, overtimeDelta, penaltyMinutes, breaks }]
     },
   }, overrides || {});
@@ -1396,9 +1396,30 @@ function computeBestStreak(profile) {
   return best;
 }
 
+// Streak retten: stellt die längste je erreichte Streak wieder her, indem die
+// fehlenden Tage vor der aktuellen Kette rückwirkend als geschützt markiert werden.
+// Gibt zurück, wie viele Tage dadurch gewonnen würden (0 = nichts zu retten).
+function streakRestoreInfo(profile) {
+  const best = computeBestStreak(profile);
+  const current = computeStreak(profile);
+  const missing = best - current;
+  return { best, current, missing: missing > 0 ? missing : 0 };
+}
+
+// Ältester Tag der aktuell laufenden Streak-Kette (oder gestern, wenn keine Kette läuft).
+function currentStreakStartDate(profile) {
+  const progress = profile.questProgress || {};
+  const frozen = new Set(profile.streakFreezeUsedDates || []);
+  const hasEntries = d => (progress[d] && Object.keys(progress[d]).length > 0) || frozen.has(d);
+  let date = todayBerlin();
+  if (!hasEntries(date)) date = addDays(date, -1);
+  if (!hasEntries(date)) return date; // gar keine Kette → hier beginnt die Rekonstruktion
+  while (hasEntries(addDays(date, -1))) date = addDays(date, -1);
+  return date;
+}
+
 // Gibt es eine frische Lücke (gestern nichts erledigt), die direkt an eine vorher bestehende
-// Streak-Kette grenzt? Basis sowohl für automatisches Einfrieren als auch für "Streak retten" —
-// ein Freeze/Repair soll nur dann greifen, wenn dadurch tatsächlich etwas gerettet wird.
+// Streak-Kette grenzt? Basis für automatisches Einfrieren per Streak-Freeze.
 function hasRepairableStreakGap(profile) {
   const today = todayBerlin();
   const yesterday = addDays(today, -1);
@@ -1482,6 +1503,22 @@ function isWorkDayToday(work) {
 function isSickToday(work) {
   const today = todayBerlin();
   return (work.sickDays || []).some(s => s.from <= today && today <= s.to);
+}
+
+function isVacationToday(work) {
+  const today = todayBerlin();
+  return (work.vacationDays || []).some(v => v.from <= today && today <= v.to);
+}
+
+// Prüft für ein beliebiges Datum, ob es ein Soll-Arbeitstag ist
+// (Wochentag laut Einstellung, kein Feiertag, kein Urlaub, keine Krankmeldung).
+function isRequiredWorkDayOn(work, dateStr) {
+  const dow = new Date(dateStr + 'T00:00:00').getDay();
+  if (!(work.workDays || [1,2,3,4,5]).includes(dow)) return false;
+  if (rlpHolidaysForYear(parseInt(dateStr.slice(0,4))).has(dateStr)) return false;
+  if ((work.sickDays || []).some(s => s.from <= dateStr && dateStr <= s.to)) return false;
+  if ((work.vacationDays || []).some(v => v.from <= dateStr && dateStr <= v.to)) return false;
+  return true;
 }
 
 function calcProRatedVacation(work) {
@@ -4203,7 +4240,8 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onEditShopItem
   const today = todayBerlin();
   const freezeCount = profile.streakFreezes || 0;
   const freezeMaxed = freezeCount >= STREAK_FREEZE_CAP;
-  const canRepair = hasRepairableStreakGap(profile);
+  const restoreInfo = streakRestoreInfo(profile);
+  const canRepair = restoreInfo.missing > 0;
   const doubleXpActive = profile.doubleXpDate === today;
 
   return (
@@ -4233,7 +4271,9 @@ function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onEditShopItem
           />
           <PowerUpCard
             icon="🔧" title="Streak retten"
-            subtitle={canRepair ? 'Deine Streak ist seit gestern unterbrochen — jetzt retten!' : 'Nur verfügbar, wenn deine Streak gerade unterbrochen wurde'}
+            subtitle={canRepair
+              ? `Stellt deine Bestmarke wieder her: ${restoreInfo.current} → ${restoreInfo.best} Tage (+${restoreInfo.missing})`
+              : 'Deine Streak ist bereits auf Bestmarke — nichts zu retten'}
             cost={STREAK_REPAIR_COST} disabled={!canRepair} affordable={profile.gold >= STREAK_REPAIR_COST}
             onBuy={onRepairStreak}
           />
@@ -4382,6 +4422,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const isToday = dateStr === todayBerlin();
             const isVacation = (profile.work?.vacationDays || []).some(v => v.from <= dateStr && dateStr <= v.to);
             const isSick = (profile.work?.sickDays || []).some(s => s.from <= dateStr && dateStr <= s.to);
+            const isAbsent = (profile.work?.workLog || []).some(e => e.date === dateStr && e.type === 'absent');
             const isHoliday = (profile.work?.enabled) && rlpHolidaysForYear(parseInt(dateStr.slice(0,4))).has(dateStr);
             return (
               <button
@@ -4405,6 +4446,7 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                 }>{d}</span>
                 <span className="flex items-center gap-0.5 h-1.5 mt-0.5">
                   {isHoliday && <span className="text-[7px] leading-none">✦</span>}
+                  {isAbsent && <span className="text-[8px] leading-none text-hp">⚠</span>}
                   {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
                   {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
@@ -5093,7 +5135,7 @@ function WorkSettings({ work, onChange }) {
   );
 }
 
-function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
+function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onDeleteSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
   const work = profile.work || {};
 
   // ---- alle Hooks zuerst ----
@@ -5119,6 +5161,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   const [resetConfirmMsg, setResetConfirmMsg] = useState('');
 
   useBackButton(showResetConfirm, () => setShowResetConfirm(false));
+  useBackButton(showBuyOT, () => setShowBuyOT(false));
   useBackButton(showVacToOT, () => setShowVacToOT(false));
   useBackButton(showVacation, () => setShowVacation(false));
   useBackButton(showSick, () => setShowSick(false));
@@ -5126,10 +5169,13 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
 
   // ---- berechnete Werte ----
   const sessionMins = calcCurrentSessionMinutes(work);
-  const isWorkDay = isWorkDayToday(work);
-  const requiredMins = isWorkDay ? (work.hoursPerDay || 8) * 60 : 0;
-  const isPaused = !!work.pauseStart;
   const isSick = isSickToday(work);
+  const isVacation = isVacationToday(work);
+  const isWorkDay = isWorkDayToday(work);
+  // An Urlaubs- und Kranktagen gilt das Soll als erfüllt → alles Gearbeitete zählt als Überstunden
+  const isFreeDay = !isWorkDay || isSick || isVacation;
+  const requiredMins = isFreeDay ? 0 : (work.hoursPerDay || 8) * 60;
+  const isPaused = !!work.pauseStart;
 
   // Gesamt-Tagesleistung = frühere Sitzungen + aktuelle Sitzung
   const workedBefore = work.workedMinutesToday || 0;
@@ -5163,6 +5209,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
             <div className="font-display font-bold text-gold text-xl">Arbeitszeit</div>
             <div className="flex gap-2">
               {isSick && <div className="text-xs text-hp">🤒 Krank</div>}
+              {isVacation && !isSick && <div className="text-xs text-[#c026d3]">🌴 Urlaub</div>}
             </div>
             <div className="flex gap-2 mt-0.5">
               <button onClick={() => setShowSick(true)} className="text-xs text-inkDim border border-border rounded-lg px-2.5 py-1 active:scale-95">
@@ -5216,12 +5263,12 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
                 :{String(displaySecs).padStart(2,'0')}
               </text>
               <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
-                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : isWorkDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : 'Freier Tag — alles → Überstunden'}
+                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : !isFreeDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : isSick ? 'Krank — alles → Überstunden' : isVacation ? 'Urlaub — alles → Überstunden' : 'Freier Tag — alles → Überstunden'}
               </text>
-              {work.clockedIn && !isPaused && isWorkDay && totalWorkedToday < requiredMins && (
+              {work.clockedIn && !isPaused && !isFreeDay && totalWorkedToday < requiredMins && (
                 <text x="130" y="178" textAnchor="middle" fill="#e55353" fontSize="11">{`noch ${formatHM(requiredMins - totalWorkedToday)}`}</text>
               )}
-              {work.clockedIn && !isPaused && isWorkDay && totalWorkedToday >= requiredMins && (
+              {work.clockedIn && !isPaused && !isFreeDay && totalWorkedToday >= requiredMins && (
                 <text x="130" y="178" textAnchor="middle" fill="#4a9b6e" fontSize="11">Tagesziel erreicht ✓</text>
               )}
             </>) : (<>
@@ -5344,27 +5391,42 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
         {/* Krankmeldungs-Modal */}
         {showSick && (
           <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
-            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
+            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto">
               <div className="font-display font-bold text-hp">🤒 Krankmeldung</div>
               <div className="space-y-2">
                 <div className="flex gap-2 items-center">
                   <span className="text-xs text-inkDim w-12">Von</span>
-                  <input type="date" value={sickFrom} onChange={e => setSickFrom(e.target.value)}
-                    className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
+                  <input type="date" value={sickFrom} onChange={e => {
+                    const v = e.target.value;
+                    setSickFrom(v);
+                    if (sickTo < v) setSickTo(v);
+                  }} className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
                 </div>
                 <div className="flex gap-2 items-center">
                   <span className="text-xs text-inkDim w-12">Bis</span>
-                  <input type="date" value={sickTo} onChange={e => setSickTo(e.target.value)}
+                  <input type="date" value={sickTo} min={sickFrom} onChange={e => setSickTo(e.target.value)}
                     className="flex-1 bg-surface border border-border rounded-xl px-3 py-2 text-sm text-ink" />
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => setShowSick(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={() => { onAddSickDay(sickFrom, sickTo); setShowSick(false); }}
-                  className="flex-1 bg-hp/20 border border-hp/50 text-hp rounded-xl py-2.5 text-sm font-semibold">
-                  Speichern
-                </button>
-              </div>
+              <button onClick={() => { onAddSickDay(sickFrom, sickTo); }}
+                className="w-full bg-hp/20 border border-hp/50 text-hp rounded-xl py-2.5 text-sm font-semibold active:scale-[0.99]">
+                Eintragen
+              </button>
+              {(work.sickDays||[]).length > 0 && (
+                <div className="border-t border-border pt-3 space-y-1.5">
+                  <div className="text-xs text-inkDim font-semibold">Eingetragene Kranktage</div>
+                  {[...(work.sickDays||[])].sort((a,b) => a.from.localeCompare(b.from)).map((s, idx) => (
+                    <div key={s.id || s.from + idx} className="flex items-center justify-between text-xs">
+                      <span className="text-ink">{s.from === s.to ? s.from : `${s.from} – ${s.to}`}</span>
+                      <button onClick={() => onDeleteSickDay(s.id || s.from)}
+                        className="text-hp ml-2 px-1.5 py-0.5 border border-hp/30 rounded active:scale-95">
+                        ↩
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => setShowSick(false)} className="w-full border border-border rounded-xl py-2.5 text-sm text-inkDim">Schließen</button>
             </div>
           </div>
         )}
@@ -5487,6 +5549,7 @@ function WorkAnalysis({ profile, onClose }) {
   const totalRequired = workDays.reduce((s, e) => s + (e.requiredMinutes||0), 0);
   const totalOvertime = workDays.reduce((s, e) => s + (e.overtimeDelta||0), 0);
   const sickCount = filtered.filter(e => e.type === 'sick').length;
+  const absentCount = filtered.filter(e => e.type === 'absent').length;
   const vacCount = filtered.filter(e => e.type === 'vacation').length;
 
   return (
@@ -5513,6 +5576,7 @@ function WorkAnalysis({ profile, onClose }) {
           <div className="flex justify-between text-sm"><span className="text-inkDim">Überstundenkonto gesamt</span><span className={`font-stat ${(work.overtimeMinutes||0)>=0?'text-heal':'text-hp'}`}>{formatHM(work.overtimeMinutes||0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-inkDim">Urlaub verfügbar</span><span className="font-stat text-gold">{calcAvailableVacation(work).toFixed(1)} Tage</span></div>
           <div className="flex justify-between text-sm"><span className="text-inkDim">Krankheitstage (Zeitraum)</span><span className="font-stat text-ink">{sickCount}</span></div>
+          {absentCount > 0 && <div className="flex justify-between text-sm"><span className="text-inkDim">Fehltage ohne Eintrag</span><span className="font-stat text-hp">{absentCount}</span></div>}
         </div>
         {workDays.length > 0 && (
           <div className="space-y-1.5">
@@ -5948,9 +6012,53 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           p.work.sessionStart = null;
           p.work.pauseStart = null;
           p.work.pausedMinutesToday = 0;
-          p.work.penaltyMinutesToday = 0;
           p.work.sessionDate = null;
           addLog(s, `🕐 ${p.name}: Offene Sitzung vom ${oldDate} automatisch beendet.`);
+        }
+      });
+    });
+  }, [loading]);
+
+  // Fehlzeiten nachtragen: vergangene Soll-Arbeitstage ohne Eintrag werden als Fehlzeit
+  // gebucht. Läuft beim Start, immer nur bis gestern (heute ist noch offen).
+  // absenceCheckedUntil verhindert Doppelbuchungen; beim ersten Lauf wird es ohne
+  // Rückwirkung gesetzt, damit nicht rückwirkend Monate auf einmal abgezogen werden.
+  useEffect(() => {
+    if (loading) return;
+    const yesterday = addDays(todayBerlin(), -1);
+    const needsCheck = state.profiles.some(p =>
+      p.work?.enabled && (p.work.absenceCheckedUntil || null) !== yesterday
+    );
+    if (!needsCheck) return;
+    update(s => {
+      s.profiles.forEach(p => {
+        if (!p.work?.enabled) return;
+        if ((p.work.absenceCheckedUntil || null) === yesterday) return;
+        // Erster Lauf → keine Rückwirkung, nur ab jetzt beobachten
+        if (!p.work.absenceCheckedUntil) {
+          p.work.absenceCheckedUntil = yesterday;
+          return;
+        }
+        if (!p.work.workLog) p.work.workLog = [];
+        const dayMins = (p.work.hoursPerDay || 8) * 60;
+        let d = addDays(p.work.absenceCheckedUntil, 1);
+        let missed = 0, guard = 0;
+        while (d <= yesterday && guard++ < 400) {
+          const hasEntry = p.work.workLog.some(e => e.date === d);
+          const beforeStart = p.work.startDate && d < p.work.startDate;
+          if (!hasEntry && !beforeStart && isRequiredWorkDayOn(p.work, d)) {
+            p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - dayMins;
+            p.work.workLog.push({
+              date: d, type: 'absent',
+              workedMinutes: 0, requiredMinutes: dayMins, overtimeDelta: -dayMins,
+            });
+            missed++;
+          }
+          d = addDays(d, 1);
+        }
+        p.work.absenceCheckedUntil = yesterday;
+        if (missed > 0) {
+          addLog(s, `⚠️ ${p.name}: ${missed} Arbeitstag${missed > 1 ? 'e' : ''} ohne Eintrag — ${formatHM(missed * dayMins)} Fehlzeit gebucht.`);
         }
       });
     });
@@ -6020,36 +6128,19 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     return () => ref.off('value', handler);
   }, []);
 
-  // Offline-First Lade-Strategie:
-  // 1. Firebase lädt (Ladescreen bleibt bis Antwort)
-  // 2. Fallback auf localStorage wenn Firebase nicht erreichbar
-  // 3. Live-Abo hält Partneränderungen aktuell, schützt aber eigene Arbeitsdaten
+  // Laden: Firebase-first, Ladescreen bis Antwort kommt.
   useEffect(() => {
     if (!authReady) return;
     let mounted = true;
 
-    const localKey = `teamquest_local_${pairingCode}`;
-
-    // Firebase laden (Ladescreen bis Antwort)
     Storage.ref(pairingCode).once('value').then(snap => {
       if (!mounted) return;
       const data = snap.exists() ? snap.val() : null;
-      const migrated = migrateState(data) || initialState();
       isRemoteUpdate.current = true;
-      setState(migrated);
-      try { localStorage.setItem(localKey, JSON.stringify(migrated)); } catch (e) {}
+      setState(migrateState(data) || initialState());
       setLoading(false);
     }).catch(() => {
       if (!mounted) return;
-      // Firebase nicht erreichbar → localStorage-Fallback
-      try {
-        const cached = localStorage.getItem(localKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          isRemoteUpdate.current = true;
-          setState(migrateState(parsed) || initialState());
-        }
-      } catch (e) {}
       setLoading(false);
     });
 
@@ -6066,8 +6157,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       });
       isRemoteUpdate.current = true;
       setState(prev => {
-        // Eigenes Profil: Arbeitsdaten aus lokalem Stand behalten
-        // (verhindert dass Partnersync laufenden Timer oder Überstunden überschreibt)
         const ownId = activeProfileIdRef.current;
         const mergedProfiles = incoming.profiles.map(inP => {
           const prevP = prev.profiles.find(p => p.id === inP.id);
@@ -6091,28 +6180,22 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           return inP;
         });
         const merged = { ...incoming, profiles: mergedProfiles };
-        // Quest-Konflikt-Auflösung
         if ((prev.questsUpdatedAt || 0) > (incoming.questsUpdatedAt || 0)) {
           merged.quests = prev.quests;
           merged.questCategories = prev.questCategories;
           merged.questsUpdatedAt = prev.questsUpdatedAt;
         }
-        try { localStorage.setItem(localKey, JSON.stringify(merged)); } catch (e) {}
         return merged;
       });
     });
     return () => { mounted = false; unsubscribe(); };
   }, [authReady, pairingCode]);
 
-  // Persistenz: jede LOKALE State-Änderung wird an Firebase gesendet.
-  // (Änderungen, die selbst aus dem Live-Abo kamen, werden hier übersprungen,
-  // sonst würden sich beide Geräte gegenseitig endlos Bestätigungen zuschicken.)
+  // Persistenz: lokale Änderungen direkt zu Firebase.
   useEffect(() => {
     if (loading) return;
     if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
-    // Backup: localStorage aktuell halten für Offline-Fallback.
-    // Firebase wird bereits in update() direkt beschrieben.
-    try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(state)); } catch (e) {}
+    Storage.save(pairingCode, state);
   }, [state]);
 
   // Team-HP initialisieren sobald mind. ein Profil vorhanden und teamHp noch null.
@@ -6140,12 +6223,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       mutator(next);
       return next;
     });
-    // Sofort synchron speichern — BEVOR React re-rendert.
-    // Wichtig: next enthält den gemuteten State, nicht das alte state-Closure.
-    if (next) {
-      try { localStorage.setItem(`teamquest_local_${pairingCode}`, JSON.stringify(next)); } catch (e) {}
-      Storage.save(pairingCode, next);
-    }
+    if (next) Storage.save(pairingCode, next);
   }
 
   const activeProfile = state.profiles.find(p => p.id === activeProfileId) || null;
@@ -6277,14 +6355,13 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         p.work.sessionStart = null;
         p.work.pauseStart = null;
         p.work.pausedMinutesToday = 0;
-        p.work.penaltyMinutesToday = 0;
         p.work.sessionDate = null;
       }
-      const logs = (p.work.workLog || []).filter(e => e.date === today && e.type === 'work');
+      const logs = (p.work.workLog || []).filter(e => e.date === today);
       logs.forEach(e => {
         p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - (e.overtimeDelta || 0);
       });
-      p.work.workLog = (p.work.workLog || []).filter(e => !(e.date === today && e.type === 'work'));
+      p.work.workLog = (p.work.workLog || []).filter(e => e.date !== today);
       addLog(s, `🔄 ${p.name}: Arbeitstag ${today} zurückgesetzt.`);
     });
     pushToast('Arbeitstag zurückgesetzt.', 'info');
@@ -6296,17 +6373,16 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       if (!p || !p.work) return;
       const today = todayBerlin();
       // Bereits heute gebuchte Minuten + Überstunden zurücklesen
-      const todayLogs = (p.work.workLog || []).filter(e => e.date === today && e.type === 'work');
+      const todayLogs = (p.work.workLog || []).filter(e => e.date === today);
       const alreadyWorked = todayLogs.reduce((sum, e) => sum + (e.workedMinutes || 0), 0);
       const alreadyBooked = todayLogs.reduce((sum, e) => sum + (e.overtimeDelta || 0), 0);
       // Gebuchtes zurücknehmen — wird beim Ausstempeln als Gesamt-Tageseintrag neu berechnet
       p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - alreadyBooked;
-      p.work.workLog = (p.work.workLog || []).filter(e => !(e.date === today && e.type === 'work'));
+      p.work.workLog = (p.work.workLog || []).filter(e => e.date !== today);
       p.work.clockedIn = true;
       p.work.sessionStart = Date.now();
       p.work.pauseStart = null;
       p.work.pausedMinutesToday = 0;
-      p.work.penaltyMinutesToday = 0;
       p.work.sessionDate = today;
       p.work.workedMinutesToday = alreadyWorked;
       addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr)${alreadyWorked > 0 ? ` — bereits ${formatHM(alreadyWorked)} heute geleistet` : ''}.`);
@@ -6354,7 +6430,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.sessionStart = null;
       p.work.pauseStart = null;
       p.work.pausedMinutesToday = 0;
-      p.work.penaltyMinutesToday = 0;
       p.work.sessionDate = null;
       p.work.workedMinutesToday = 0;
       addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(totalWorked)} heute gesamt, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
@@ -6368,8 +6443,19 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       if (!p.work.sickDays) p.work.sickDays = [];
-      p.work.sickDays.push({ from, to, note: '' });
+      p.work.sickDays.push({ id: uid('sick'), from, to, note: '' });
       addLog(s, `🤒 ${p.name} krank: ${from} bis ${to}.`);
+    });
+  }
+
+  function handleDeleteSickDay(sickId) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work || !p.work.sickDays) return;
+      const entry = p.work.sickDays.find(x => x.id === sickId || x.from === sickId);
+      if (!entry) return;
+      p.work.sickDays = p.work.sickDays.filter(x => x.id !== sickId && x.from !== sickId);
+      addLog(s, `↩️ ${p.name}: Krankmeldung ${entry.from}–${entry.to} entfernt.`);
     });
   }
 
@@ -6708,18 +6794,25 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleRepairStreak() {
-    if (!hasRepairableStreakGap(activeProfile)) return;
+    const info = streakRestoreInfo(activeProfile);
+    if (info.missing <= 0) return;
     if ((activeProfile.gold || 0) < STREAK_REPAIR_COST) return;
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p || !hasRepairableStreakGap(p)) return;
+      if (!p) return;
+      const inner = streakRestoreInfo(p);
+      if (inner.missing <= 0) return;
       p.gold -= STREAK_REPAIR_COST;
-      const yesterday = addDays(todayBerlin(), -1);
       if (!p.streakFreezeUsedDates) p.streakFreezeUsedDates = [];
-      if (!p.streakFreezeUsedDates.includes(yesterday)) p.streakFreezeUsedDates.push(yesterday);
-      addLog(s, `🔧 ${p.name} hat die Streak gerettet.`);
+      // Fehlende Tage direkt vor der aktuellen Kette als geschützt markieren
+      let d = addDays(currentStreakStartDate(p), inner.current > 0 ? -1 : 0);
+      for (let i = 0; i < inner.missing; i++) {
+        if (!p.streakFreezeUsedDates.includes(d)) p.streakFreezeUsedDates.push(d);
+        d = addDays(d, -1);
+      }
+      addLog(s, `🔧 ${p.name} hat die Streak gerettet — zurück auf ${inner.best} Tage (+${inner.missing}).`);
     });
-    pushToast('Streak gerettet! 🔥', 'info');
+    pushToast(`Streak gerettet! 🔥 ${info.best} Tage`, 'info');
   }
 
   function handleBuyDoubleXp() {
@@ -6951,6 +7044,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onResume={handleWorkResume}
           onClockOut={handleWorkClockOut}
           onAddSickDay={handleAddSickDay}
+          onDeleteSickDay={handleDeleteSickDay}
           onAddVacation={handleAddVacation}
           onDeleteVacation={handleDeleteVacation}
           onBuyOvertime={handleBuyOvertime}
