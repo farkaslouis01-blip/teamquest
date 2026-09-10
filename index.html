@@ -5929,6 +5929,8 @@ function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onCom
 function TeamQuestApp({ pairingCode, onUnpair }) {
   const [state, setState] = useState(() => initialState());
   const [loading, setLoading] = useState(true);
+  // Datumswechsel erkennen, damit Tages-Checks auch laufen wenn die App offen bleibt
+  const [dayTick, setDayTick] = useState(() => todayBerlin());
   const [authReady, setAuthReady] = useState(false);
   const [connStatus, setConnStatus] = useState('connecting');
   const isRemoteUpdate = useRef(false);
@@ -6017,10 +6019,20 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         }
       });
     });
-  }, [loading]);
+  }, [loading, dayTick]);
+
+  // Mitternachts-Watcher: prüft minütlich, ob ein neuer Tag begonnen hat.
+  // Löst dadurch die Tages-Checks (Fehlzeiten etc.) auch bei dauerhaft offener App aus.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const now = todayBerlin();
+      setDayTick(prev => (prev !== now ? now : prev));
+    }, 60000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Fehlzeiten nachtragen: vergangene Soll-Arbeitstage ohne Eintrag werden als Fehlzeit
-  // gebucht. Läuft beim Start, immer nur bis gestern (heute ist noch offen).
+  // gebucht. Bucht immer nur bis gestern — der laufende Tag bleibt bis Mitternacht offen.
   // absenceCheckedUntil verhindert Doppelbuchungen; beim ersten Lauf wird es ohne
   // Rückwirkung gesetzt, damit nicht rückwirkend Monate auf einmal abgezogen werden.
   useEffect(() => {
@@ -6062,7 +6074,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         }
       });
     });
-  }, [loading]);
+  }, [loading, dayTick]);
 
   // Automatisches Einfrieren eines verpassten Tages, falls noch ein Streak-Freeze vorhanden ist.
   // Läuft als richtige update()-Mutation (nicht nur in migrateState), damit es korrekt zu
@@ -6438,13 +6450,44 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     setFreizeitScreenOpen(false);
   }
 
+  // Bereits gebuchte Fehltage in einem Zeitraum stornieren (z.B. wenn nachträglich
+  // Urlaub oder Krankheit für diese Tage eingetragen wird).
+  // Alle Einträge in einem Zeitraum neu bewerten, weil dort nachträglich Urlaub oder
+  // Krankheit eingetragen wurde. Das Soll fällt für diese Tage weg:
+  //   - reine Fehltage werden gelöscht und die Fehlzeit zurückgebucht
+  //   - Arbeitstage behalten ihre Stunden, zählen aber komplett als Überstunden
+  function clearAbsencesInRange(work, from, to) {
+    const inRange = e => e.date >= from && e.date <= to;
+    let clearedAbsences = 0, adjustedWork = 0;
+    (work.workLog || []).forEach(e => {
+      if (!inRange(e)) return;
+      if (e.type === 'absent') {
+        work.overtimeMinutes = (work.overtimeMinutes || 0) - (e.overtimeDelta || 0);
+        clearedAbsences++;
+      } else if (e.type === 'work') {
+        // Soll entfällt → alles Gearbeitete wird zu Überstunden
+        const newDelta = e.workedMinutes || 0;
+        work.overtimeMinutes = (work.overtimeMinutes || 0) + (newDelta - (e.overtimeDelta || 0));
+        e.requiredMinutes = 0;
+        e.overtimeDelta = newDelta;
+        adjustedWork++;
+      }
+    });
+    work.workLog = (work.workLog || []).filter(e => !(e.type === 'absent' && inRange(e)));
+    return { clearedAbsences, adjustedWork, total: clearedAbsences + adjustedWork };
+  }
+
   function handleAddSickDay(from, to) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       if (!p.work.sickDays) p.work.sickDays = [];
       p.work.sickDays.push({ id: uid('sick'), from, to, note: '' });
-      addLog(s, `🤒 ${p.name} krank: ${from} bis ${to}.`);
+      const adj = clearAbsencesInRange(p.work, from, to);
+      const parts = [];
+      if (adj.clearedAbsences > 0) parts.push(`${adj.clearedAbsences} Fehltag${adj.clearedAbsences > 1 ? 'e' : ''} storniert`);
+      if (adj.adjustedWork > 0) parts.push(`${adj.adjustedWork} Arbeitstag${adj.adjustedWork > 1 ? 'e' : ''} → Überstunden`);
+      addLog(s, `🤒 ${p.name} krank: ${from} bis ${to}.${parts.length ? ' ' + parts.join(', ') + '.' : ''}`);
     });
   }
 
@@ -6464,18 +6507,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       if (!p.work.vacationDays) p.work.vacationDays = [];
+      // Bereits gebuchte Fehltage in diesem Zeitraum zuerst stornieren
+      const adjV = clearAbsencesInRange(p.work, from, to);
+      const clearedAbs = adjV.total;
       const days = countWorkDays(from, to, p.work); // Feiertage automatisch raus
       const minutesNeeded = days * (p.work.hoursPerDay || 8) * 60;
       if (type === 'overtime') {
         if ((p.work.overtimeMinutes || 0) < minutesNeeded) return; // nicht genug Überstunden
         p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - minutesNeeded;
         p.work.vacationDays.push({ id: uid('vac'), from, to, type: 'overtime', days, minutesDeducted: minutesNeeded });
-        addLog(s, `🌴 ${p.name} Urlaub (Überstunden): ${from}–${to} (${days} Tage, ${formatHM(minutesNeeded)} abgezogen).`);
+        addLog(s, `🌴 ${p.name} Urlaub (Überstunden): ${from}–${to} (${days} Tage, ${formatHM(minutesNeeded)} abgezogen).${clearedAbs > 0 ? ` ${clearedAbs} Tag${clearedAbs > 1 ? 'e' : ''} neu verrechnet.` : ''}`);
       } else {
         if (calcAvailableVacation(p.work) < days) return; // nicht genug Urlaubstage
         p.work.vacationDaysUsed = (p.work.vacationDaysUsed || 0) + days;
         p.work.vacationDays.push({ id: uid('vac'), from, to, type: 'vacation', days });
-        addLog(s, `🌴 ${p.name} Urlaub: ${from}–${to} (${days} Arbeitstage).`);
+        addLog(s, `🌴 ${p.name} Urlaub: ${from}–${to} (${days} Arbeitstage).${clearedAbs > 0 ? ` ${clearedAbs} Tag${clearedAbs > 1 ? 'e' : ''} neu verrechnet.` : ''}`);
       }
     });
   }
