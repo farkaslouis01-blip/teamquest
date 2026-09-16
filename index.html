@@ -5942,6 +5942,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [authReady, setAuthReady] = useState(false);
   const [connStatus, setConnStatus] = useState('connecting');
   const isRemoteUpdate = useRef(false);
+  // Spiegelt den aktuellen State synchron — nötig weil React 18 setState batcht
+  // und die Updater-Funktion erst beim Render läuft.
+  const stateRef = useRef(null);
   const activeProfileIdRef = useRef(null); // für Closures in subscribe-Callback
   const [activeTab, setActiveTab] = useState('kalender');
   const [toasts, setToasts] = useState([]);
@@ -6195,6 +6198,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               vacationDays: prevP.work.vacationDays,
               vacationDaysUsed: prevP.work.vacationDaysUsed,
               sickDays: prevP.work.sickDays,
+              workedMinutesToday: prevP.work.workedMinutesToday,
+              absenceCheckedUntil: prevP.work.absenceCheckedUntil,
             }};
           }
           return inP;
@@ -6211,7 +6216,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     return () => { mounted = false; unsubscribe(); };
   }, [authReady, pairingCode]);
 
-  // Persistenz: lokale Änderungen direkt zu Firebase.
+  // stateRef immer synchron halten — auch bei setState-Aufrufen außerhalb von update().
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  // Persistenz-Netz: fängt State-Änderungen ab, die nicht über update() liefen.
   useEffect(() => {
     if (loading) return;
     if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
@@ -6237,25 +6245,23 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // setzt ihn und gibt ihn synchron zurück — so können Aufrufer sofort mit dem
   // neuen Stand weiterarbeiten, ohne auf den asynchronen React-Re-Render zu warten.
   function update(mutator) {
-    let next;
-    setState(prev => {
-      next = JSON.parse(JSON.stringify(prev));
-      mutator(next);
-      return next;
-    });
-    if (next) Storage.save(pairingCode, next);
+    const base = stateRef.current || state;
+    const next = JSON.parse(JSON.stringify(base));
+    mutator(next);
+    stateRef.current = next;        // sofort verfügbar für Folge-Updates im selben Tick
+    setState(next);
+    Storage.save(pairingCode, next);
+    return next;
   }
 
   // Wie update(), wartet aber auf die Server-Bestätigung und zeigt solange ein Overlay.
   // Für Aktionen, bei denen ein stiller Fehlschlag teuer wäre (Ein-/Ausstempeln).
   async function updateConfirmed(mutator, label) {
-    let next;
-    setState(prev => {
-      next = JSON.parse(JSON.stringify(prev));
-      mutator(next);
-      return next;
-    });
-    if (!next) return false;
+    const base = stateRef.current || state;
+    const next = JSON.parse(JSON.stringify(base));
+    mutator(next);
+    stateRef.current = next;
+    setState(next);
     setSyncing({ label: label || 'Speichern' });
     setSyncError(null);
     try {
