@@ -5935,6 +5935,7 @@ function DeadlineRow({ quest, deadline, calendarViewedDate, activeProfile, onCom
 function TeamQuestApp({ pairingCode, onUnpair }) {
   const [state, setState] = useState(() => initialState());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   // Datumswechsel erkennen, damit Tages-Checks auch laufen wenn die App offen bleibt
   const [dayTick, setDayTick] = useState(() => todayBerlin());
   const [syncing, setSyncing] = useState(null); // { label } während kritischer Speichervorgänge
@@ -5945,6 +5946,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // Spiegelt den aktuellen State synchron — nötig weil React 18 setState batcht
   // und die Updater-Funktion erst beim Render läuft.
   const stateRef = useRef(null);
+  const lastKnownProfilesCount = useRef(0);
   const activeProfileIdRef = useRef(null); // für Closures in subscribe-Callback
   const [activeTab, setActiveTab] = useState('kalender');
   const [toasts, setToasts] = useState([]);
@@ -6152,20 +6154,37 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }, []);
 
   // Laden: Firebase-first, Ladescreen bis Antwort kommt.
+  // Ein fehlgeschlagener Ladevorgang (Netzwerk, Timeout) wird als FEHLER behandelt
+  // und erneut versucht — niemals als "keine Daten vorhanden" interpretiert.
+  // Nur ein tatsächlich erfolgreicher Read mit snap.exists()===false gilt als "neuer Code".
   useEffect(() => {
     if (!authReady) return;
     let mounted = true;
+    let attempt = 0;
 
-    Storage.ref(pairingCode).once('value').then(snap => {
-      if (!mounted) return;
-      const data = snap.exists() ? snap.val() : null;
-      isRemoteUpdate.current = true;
-      setState(migrateState(data) || initialState());
-      setLoading(false);
-    }).catch(() => {
-      if (!mounted) return;
-      setLoading(false);
-    });
+    function tryLoad() {
+      attempt++;
+      Storage.ref(pairingCode).once('value').then(snap => {
+        if (!mounted) return;
+        const data = snap.exists() ? snap.val() : null;
+        isRemoteUpdate.current = true;
+        const loaded = migrateState(data) || initialState();
+        stateRef.current = loaded;
+        if ((loaded.profiles?.length || 0) > 0) lastKnownProfilesCount.current = loaded.profiles.length;
+        setState(loaded);
+        setLoading(false);
+        setLoadError(null);
+      }).catch(() => {
+        if (!mounted) return;
+        if (attempt < 5) {
+          setTimeout(() => { if (mounted) tryLoad(); }, Math.min(2000 * attempt, 8000));
+        } else {
+          // Nach mehreren Fehlversuchen: Fehler anzeigen statt mit leerem Zustand weiterzumachen.
+          setLoadError('Verbindung zur Datenbank fehlgeschlagen.');
+        }
+      });
+    }
+    tryLoad();
 
     // Live-Abo für Partneränderungen
     const unsubscribe = Storage.subscribe(pairingCode, (data) => {
@@ -6223,6 +6242,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   useEffect(() => {
     if (loading) return;
     if (isRemoteUpdate.current) { isRemoteUpdate.current = false; return; }
+    if ((state.profiles?.length || 0) === 0 && (lastKnownProfilesCount.current || 0) > 0) {
+      console.error('TeamQuest: Persistenz-Netz hat Profil-Löschung blockiert.');
+      pushToast('⚠️ Speichern blockiert (Sicherheitssperre) — bitte Seite neu laden.', 'error');
+      return;
+    }
+    if ((state.profiles?.length || 0) > 0) lastKnownProfilesCount.current = state.profiles.length;
     Storage.save(pairingCode, state);
   }, [state]);
 
@@ -6233,6 +6258,21 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     }
   }, [state.profiles.length]);
 
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center gap-3">
+        <div className="text-3xl">⚠️</div>
+        <div className="font-display text-lg font-bold text-hp">Laden fehlgeschlagen</div>
+        <div className="text-sm text-inkDim max-w-xs">
+          {loadError} Deine Daten sind dadurch NICHT verloren — die App wurde bewusst angehalten, um nichts zu überschreiben. Bitte Internetverbindung prüfen und neu laden.
+        </div>
+        <button onClick={() => window.location.reload()}
+          className="mt-2 bg-gold text-bg font-semibold rounded-xl px-5 py-2.5 active:scale-95">
+          Neu laden
+        </button>
+      </div>
+    );
+  }
   if (loading) return <LoadingScreen />;
 
   function pushToast(text, type) {
@@ -6244,10 +6284,27 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   // Zentraler State-Funnel: klont den aktuellen State, wendet den Mutator an,
   // setzt ihn und gibt ihn synchron zurück — so können Aufrufer sofort mit dem
   // neuen Stand weiterarbeiten, ohne auf den asynchronen React-Re-Render zu warten.
+  // Schützt davor, dass ein Speichervorgang jemals ein befülltes Profil-Array
+  // stillschweigend auf leer setzt (z. B. durch einen fehlerhaften/leeren Ladezustand,
+  // der versehentlich zu Firebase gepusht wird). Echtes Trennen läuft über onUnpair,
+  // das clearPairingCode() aufruft und diesen Pfad hier gar nicht mehr durchläuft.
+  function guardAgainstProfileWipe(base, next) {
+    if ((base?.profiles?.length || 0) > 0 && (next?.profiles?.length || 0) === 0) {
+      console.error('TeamQuest: Speichern blockiert — hätte alle Profile gelöscht.', { base, next });
+      return false;
+    }
+    if ((next?.profiles?.length || 0) > 0) lastKnownProfilesCount.current = next.profiles.length;
+    return true;
+  }
+
   function update(mutator) {
     const base = stateRef.current || state;
     const next = JSON.parse(JSON.stringify(base));
     mutator(next);
+    if (!guardAgainstProfileWipe(base, next)) {
+      pushToast('⚠️ Speichern blockiert (Sicherheitssperre) — bitte Seite neu laden.', 'error');
+      return base;
+    }
     stateRef.current = next;        // sofort verfügbar für Folge-Updates im selben Tick
     setState(next);
     Storage.save(pairingCode, next);
@@ -6260,6 +6317,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     const base = stateRef.current || state;
     const next = JSON.parse(JSON.stringify(base));
     mutator(next);
+    if (!guardAgainstProfileWipe(base, next)) {
+      pushToast('⚠️ Speichern blockiert (Sicherheitssperre) — bitte Seite neu laden.', 'error');
+      return false;
+    }
     stateRef.current = next;
     setState(next);
     setSyncing({ label: label || 'Speichern' });
