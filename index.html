@@ -511,6 +511,12 @@ const Storage = {
       return false;
     }
   },
+  // Wie save(), aber mit Promise — für Aktionen, bei denen wir auf die Bestätigung
+  // vom Server warten wollen (Ein-/Ausstempeln). Wirft bei Fehler.
+  saveConfirmed(code, state) {
+    const payload = Object.assign({}, state, { _meta: { updatedBy: CLIENT_ID, updatedAt: Date.now() } });
+    return this.ref(code).set(payload);
+  },
   // Live-Abo: feuert bei jeder Änderung am Pfad (eigene Schreibvorgänge ausgenommen).
   subscribe(code, onChange) {
     const handler = (snap) => {
@@ -5931,6 +5937,8 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [loading, setLoading] = useState(true);
   // Datumswechsel erkennen, damit Tages-Checks auch laufen wenn die App offen bleibt
   const [dayTick, setDayTick] = useState(() => todayBerlin());
+  const [syncing, setSyncing] = useState(null); // { label } während kritischer Speichervorgänge
+  const [syncError, setSyncError] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [connStatus, setConnStatus] = useState('connecting');
   const isRemoteUpdate = useRef(false);
@@ -6238,6 +6246,32 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     if (next) Storage.save(pairingCode, next);
   }
 
+  // Wie update(), wartet aber auf die Server-Bestätigung und zeigt solange ein Overlay.
+  // Für Aktionen, bei denen ein stiller Fehlschlag teuer wäre (Ein-/Ausstempeln).
+  async function updateConfirmed(mutator, label) {
+    let next;
+    setState(prev => {
+      next = JSON.parse(JSON.stringify(prev));
+      mutator(next);
+      return next;
+    });
+    if (!next) return false;
+    setSyncing({ label: label || 'Speichern' });
+    setSyncError(null);
+    try {
+      await Promise.race([
+        Storage.saveConfirmed(pairingCode, next),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
+      ]);
+      setSyncing(null);
+      return true;
+    } catch (e) {
+      setSyncing(null);
+      setSyncError(label || 'Speichern');
+      return false;
+    }
+  }
+
   const activeProfile = state.profiles.find(p => p.id === activeProfileId) || null;
   const partnerProfile = state.profiles.find(p => p.id !== activeProfileId) || null;
 
@@ -6380,7 +6414,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleWorkClockIn() {
-    update(s => {
+    updateConfirmed(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       const today = todayBerlin();
@@ -6398,28 +6432,28 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.sessionDate = today;
       p.work.workedMinutesToday = alreadyWorked;
       addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr)${alreadyWorked > 0 ? ` — bereits ${formatHM(alreadyWorked)} heute geleistet` : ''}.`);
-    });
+    }, 'Einstempeln');
   }
 
   function handleWorkPause() {
-    update(s => {
+    updateConfirmed(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (p && p.work && !p.work.pauseStart) p.work.pauseStart = Date.now();
-    });
+    }, 'Pause starten');
   }
 
   function handleWorkResume() {
-    update(s => {
+    updateConfirmed(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work || !p.work.pauseStart) return;
       const pausedMins = (Date.now() - p.work.pauseStart) / 60000;
       p.work.pausedMinutesToday = (p.work.pausedMinutesToday||0) + pausedMins;
       p.work.pauseStart = null;
-    });
+    }, 'Pause beenden');
   }
 
   function handleWorkClockOut({ sessionMins, reqMins }) {
-    update(s => {
+    updateConfirmed(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       const clockIn = formatTimeHHMM(p.work.sessionStart);
@@ -6445,9 +6479,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       p.work.sessionDate = null;
       p.work.workedMinutesToday = 0;
       addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(totalWorked)} heute gesamt, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
+    }, 'Ausstempeln').then(ok => {
+      if (ok) {
+        setWorkScreenOpen(false);
+        setFreizeitScreenOpen(false);
+      }
     });
-    setWorkScreenOpen(false);
-    setFreizeitScreenOpen(false);
   }
 
   // Bereits gebuchte Fehltage in einem Zeitraum stornieren (z.B. wenn nachträglich
@@ -7069,6 +7106,33 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       }}
     >
       <ToastStack toasts={toasts} />
+
+      {/* Sync-Overlay bei kritischen Speichervorgängen */}
+      {syncing && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70">
+          <div className="bg-bgElevated border border-border rounded-2xl px-8 py-6 flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-[3px] border-gold/30 border-t-gold rounded-full animate-spin"></div>
+            <div className="text-sm text-ink font-semibold">{syncing.label}…</div>
+            <div className="text-[11px] text-inkDim">Daten werden gespeichert</div>
+          </div>
+        </div>
+      )}
+
+      {/* Fehler beim Speichern */}
+      {syncError && (
+        <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-sm bg-bgElevated border border-hp/50 rounded-2xl p-5 space-y-3">
+            <div className="font-display font-bold text-hp">⚠️ Nicht gespeichert</div>
+            <div className="text-sm text-ink leading-relaxed">
+              „{syncError}" konnte nicht an den Server übertragen werden. Prüfe deine Internetverbindung und versuche es erneut.
+            </div>
+            <button onClick={() => setSyncError(null)}
+              className="w-full bg-hp/20 border border-hp/50 text-hp rounded-xl py-2.5 text-sm font-semibold active:scale-95">
+              Verstanden
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Freizeit-Timer Vollbild */}
       {activeProfile.freizeitEnabled && (freizeitScreenOpen || activeProfile.freizeitTimer?.running) && (
