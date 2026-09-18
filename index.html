@@ -265,12 +265,6 @@ function xpForLevel(level) {
   return 90 + 5 * level * (level + 1);
 }
 
-// Power-Up-Konfiguration (Duolingo-inspiriert) — an einer Stelle für einfaches Balancing.
-const STREAK_FREEZE_COST = 8;
-const STREAK_FREEZE_CAP = 2;
-const STREAK_REPAIR_COST = 10;
-const DOUBLE_XP_COST = 6;
-
 // Streak-Meilensteine: 10, 22, 36, 52, 70, ...
 // Zwischen den Meilensteinen: +12, +14, +16, ... (jeweils 2 mehr)
 // Formel für den n-ten Meilenstein (1-basiert): 10 + (n-1) * (10 + n)
@@ -334,35 +328,6 @@ function topUnlockedMethod(profile) {
   const unlocked = METHODS.filter(m => profile.level >= m.unlockLevel);
   return unlocked.length ? unlocked[unlocked.length - 1] : null;
 }
-
-const SHOP_GEMEINSAM = [
-  { id: 's1', title: 'Filmabend', cost: 50, icon: '🎬', custom: false },
-  { id: 's2', title: 'Quest-freier Tag', cost: 80, icon: '🌴', custom: false },
-  { id: 's3', title: 'Restaurant-Abend', cost: 150, icon: '🍝', custom: false },
-  { id: 's4', title: 'Kurztrip', cost: 250, icon: '🧳', custom: false },
-  { id: 's5', title: 'Spaziergang + Eis', cost: 20, icon: '🍦', custom: false },
-  { id: 's6', title: 'Spieleabend', cost: 30, icon: '🎲', custom: false },
-  { id: 's7', title: 'Pizza-/Takeout-Abend', cost: 35, icon: '🍕', custom: false },
-  { id: 's8', title: 'Café-Date', cost: 40, icon: '☕', custom: false },
-  { id: 's9', title: 'Bowling / Minigolf / Kart', cost: 70, icon: '🎳', custom: false },
-  { id: 's10', title: 'Wellness-Tag zuhause', cost: 90, icon: '🛁', custom: false },
-  { id: 's11', title: 'Escape Room / Event-Tag', cost: 130, icon: '🔐', custom: false },
-  { id: 's12', title: 'Konzert-/Event-Tickets', cost: 200, icon: '🎤', custom: false },
-];
-const SHOP_GESCHENK = [
-  { id: 'g1', title: 'Quest-Gutschein', cost: 40, icon: '🎟️', custom: false },
-  { id: 'g2', title: 'Frühstück ans Bett', cost: 50, icon: '🥐', custom: false },
-  { id: 'g3', title: 'Massage', cost: 70, icon: '💆', custom: false },
-  { id: 'g4', title: 'Überraschung', cost: 200, icon: '🎁', custom: false },
-  { id: 'g5', title: 'Kaffee/Tee ans Bett', cost: 15, icon: '☕', custom: false },
-  { id: 'g6', title: 'Lieblingssnack besorgen', cost: 20, icon: '🍫', custom: false },
-  { id: 'g7', title: 'Liebesbrief / Gedicht', cost: 20, icon: '💌', custom: false },
-  { id: 'g8', title: 'Eine Hausarbeit abnehmen', cost: 25, icon: '🧹', custom: false },
-  { id: 'g9', title: 'Fußmassage', cost: 35, icon: '🦶', custom: false },
-  { id: 'g10', title: 'Lieblingsessen kochen', cost: 55, icon: '🍳', custom: false },
-  { id: 'g11', title: 'Date-Night komplett planen', cost: 90, icon: '📅', custom: false },
-  { id: 'g12', title: 'Ein Wunsch frei (im Rahmen)', cost: 180, icon: '✨', custom: false },
-];
 
 const MAX_ACTIONS_PER_DAY = 3;
 const CALENDAR_XP_PER_TASK = 5;
@@ -550,24 +515,12 @@ function freshProfile(overrides) {
     actionsGrantedFor: {},                     // { 'YYYY-MM-DD': { questId: true } } — verhindert doppelte Aktionen durch kurz->komplett
     xpGrantedFor: {},                          // { 'YYYY-MM-DD': { questId: <tatsächlich vergebene XP heute> } } — für exaktes Rückgängigmachen
     cooldowns: {},        // { abilityId: 'YYYY-MM-DD' (zuletzt benutzt) }
-    inventory: [],         // erfüllte/offene "Geschenk vom Partner"-Items
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
     questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 50/Tag, +10 pro Level über 1, +5 pro schwere Quest)
     sportTrackingEnabled: false,
     sportLog: {},
     questDeadlines: {},
     alarmEnabled: false,
-    freizeitEnabled: false,
-    freizeitTimer: {
-      running: false,
-      startedAt: null,      // Unix ms — Hintergrund-Timer
-      pendingMinutes: 0,    // aufgelaufene Minuten (0–59.99), werden nicht verworfen
-      log: [],              // [{ date, totalMinutes, entries:[{category,minutes}] }]
-      customCategories: [], // eigene Kategorien
-    },
-    streakFreezes: 0,             // Anzahl verfügbarer Streak-Freezes (max. STREAK_FREEZE_CAP)
-    streakFreezeUsedDates: [],    // Tage, die per Freeze/Streak-retten geschützt wurden
-    doubleXpDate: null,           // 'YYYY-MM-DD' — falls = heute, gilt 2x XP für den Rest des Tages
     abilityUpgradePoints: 0,      // Punkte zum Verbessern von Abilities (aus Streak-Meilensteinen)
     streakUpgradePointsEarned: 0, // Gesamt jemals verdiente Punkte (nie kleiner — Basis für Meilenstein-Check)
     abilityUpgrades: {},          // { abilityId: bonusValue } — kumulierter Bonus pro Ability
@@ -577,23 +530,22 @@ function freshProfile(overrides) {
       // Einstellungen
       workDays: [1,2,3,4,5],    // 1=Mo…5=Fr (JS getDay: 0=So,1=Mo,…,6=Sa)
       hoursPerDay: 8,            // Soll-Stunden pro Tag
-      startTime: '09:30',        // Spätester Beginn ohne Strafe (HH:MM)
       vacationDaysPerYear: 30,   // Urlaubstage laut Vertrag
       startDate: null,           // 'YYYY-MM-DD' — Anstellungsbeginn (für anteilige Berechnung)
       // Konten
       overtimeMinutes: 0,        // Gesamtes Überstundenkonto in Minuten
-      vacationDaysUsed: 0,       // Genutzte Urlaubstage (kann Dezimalzahl sein)
+      vacationDaysUsed: 0,       // Genutzte Urlaubstage (kann Dezimalzahl sein) — bezieht sich auf vacationYear
+      vacationYear: null,        // Jahr, für das vacationDaysUsed zählt — reset bei Jahreswechsel
       vacationDays: [],          // [{ from, to, type: 'vacation'|'overtime' }] — eingetragene Urlaubszeiträume
       // Aktive Session
       clockedIn: false,
-      sessionStart: null,        // Unix-ms Einst.-Zeitpunkt (nach letzter Pause)
-      pauseStart: null,          // Unix-ms Pause-Beginn (null = keine aktive Pause)
-      pausedMinutesToday: 0,     // Pausen der heutigen Session in Minuten
-      sessionDate: null,         // 'YYYY-MM-DD' — Datum der laufenden Session
+      sessionStart: null,        // Unix-ms Einstempel-Zeitpunkt der laufenden Sitzung
+      sessionDate: null,         // 'YYYY-MM-DD' — Tag, für den workedMinutesToday zählt (bis Mitternacht)
+      workedMinutesToday: 0,     // Minuten aus bereits beendeten Sitzungen heute — noch NICHT gebucht
       // Krankmeldungen + Log
       sickDays: [],              // [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', note: '' }]
       absenceCheckedUntil: null, // bis zu diesem Datum wurden Fehltage bereits geprüft
-      workLog: [],               // [{ date, type, clockIn, clockOut, workedMinutes, requiredMinutes, overtimeDelta, penaltyMinutes, breaks }]
+      workLog: [],               // [{ date, type, workedMinutes, requiredMinutes, overtimeDelta }]
     },
   }, overrides || {});
 }
@@ -605,8 +557,6 @@ function initialState() {
     quests: DEFAULT_QUESTS.slice(),
     questCategories: DEFAULT_QUEST_CATEGORIES.slice(),
     questsUpdatedAt: 0,   // Timestamp der letzten Quest-Bearbeitung — verhindert Race Conditions beim Sync
-    shop: { gemeinsam: SHOP_GEMEINSAM.slice(), geschenk: SHOP_GESCHENK.slice() },
-    sharedInventory: [],
     combat: {
       bossTier: 0,
       bossHp: BOSS_TIERS[0].hp,
@@ -618,7 +568,6 @@ function initialState() {
       maxTierDefeated: -1,  // höchster bisher besiegter Tier (-1 = noch keiner)
       actionContributions: {}, // { profileId: anzahl } — Aktionen pro Profil im aktuellen Kampf
     },
-    pendingConfirmations: [], // [{ id, category, itemId, title, cost, buyerId, partnerId, buyerPaid, partnerPaid }]
     log: [],                  // [{ id, ts, text }]
     calendarItems: [],        // [{ id, kind: 'aufgabe'|'termin', title, icon, date, recurrence, carryForward, occurrences }]
     birthdays: [],            // [{ id, name, day, month, year? }] — day/month 1-basiert
@@ -669,25 +618,21 @@ function migrateState(loaded) {
 
   if (!Array.isArray(merged.calendarItems)) merged.calendarItems = [];
 
-  // Shop-Katalog: neue Standard-Items (Erweiterung) ergänzen, die im alten
-  // gespeicherten Stand noch fehlen — eigene/angepasste Items bleiben unangetastet.
-  if (!merged.shop || typeof merged.shop !== 'object') merged.shop = { gemeinsam: [], geschenk: [] };
-  if (!Array.isArray(merged.deletedDefaultShopIds)) merged.deletedDefaultShopIds = [];
-  const deletedShopSet = new Set(merged.deletedDefaultShopIds);
-  ['gemeinsam', 'geschenk'].forEach(cat => {
-    const defaults = cat === 'gemeinsam' ? SHOP_GEMEINSAM : SHOP_GESCHENK;
-    const list = Array.isArray(merged.shop[cat]) ? merged.shop[cat] : [];
-    const existingIds = new Set(list.map(i => i.id));
-    defaults.forEach(d => { if (!existingIds.has(d.id) && !deletedShopSet.has(d.id)) list.push(Object.assign({}, d)); });
-    merged.shop[cat] = list;
-  });
-  // Filmabend-Preis wurde bewusst von 60 auf 50 angepasst — nur überschreiben,
-  // falls noch der alte Default-Wert vorliegt (keine eigene Anpassung überschreiben).
-  const filmabend = merged.shop.gemeinsam.find(i => i.id === 's1');
-  if (filmabend && filmabend.cost === 60) filmabend.cost = 50;
+  // Alte Shop-/Inventar-/Power-Up-Felder aus früher gespeicherten Ständen entfernen —
+  // diese Features gibt es nicht mehr, die Felder sollen nicht ewig mitgeschleppt werden.
+  delete merged.shop;
+  delete merged.sharedInventory;
+  delete merged.pendingConfirmations;
+  delete merged.deletedDefaultShopIds;
 
   // Profile: fehlende neuere Felder (actionsSpent, actionsGrantedFor, ...) aus freshProfile() auffüllen.
-  merged.profiles = (Array.isArray(merged.profiles) ? merged.profiles : []).map(p => Object.assign(freshProfile(), p));
+  merged.profiles = (Array.isArray(merged.profiles) ? merged.profiles : []).map(p => {
+    const fresh = Object.assign(freshProfile(), p);
+    delete fresh.streakFreezes;
+    delete fresh.streakFreezeUsedDates;
+    delete fresh.doubleXpDate;
+    return fresh;
+  });
 
   // Combat-Unterobjekt defensiv zusammenführen, falls dort künftig neue Felder dazukommen.
   merged.combat = Object.assign({}, base.combat, loaded.combat || {});
@@ -1368,11 +1313,9 @@ function useAbility(state, profileId, abilityId) {
 
 // Aktuelle Streak rein aus der Quest-Historie ableiten (questProgress) — keine eigene
 // Buchführung nötig, dadurch bleibt sie immer exakt synchron, auch bei Rückgängig-Machen.
-// Tage, die per Streak-Freeze/Streak-retten geschützt wurden, zählen genauso wie erledigte Tage.
 function computeStreak(profile) {
   const progress = profile.questProgress || {};
-  const frozen = new Set(profile.streakFreezeUsedDates || []);
-  const hasEntries = d => (progress[d] && Object.keys(progress[d]).length > 0) || frozen.has(d);
+  const hasEntries = d => progress[d] && Object.keys(progress[d]).length > 0;
   let date = todayBerlin();
   // Heute noch nichts erledigt? Dann ist die Streak noch nicht gebrochen, aber auch noch
   // nicht verlängert — Rückwärtslauf beginnt bei gestern.
@@ -1385,14 +1328,10 @@ function computeStreak(profile) {
   return streak;
 }
 
-// Längste je erreichte Streak — ebenfalls vollständig aus der Historie abgeleitet (inkl. geschützter Tage).
+// Längste je erreichte Streak — ebenfalls vollständig aus der Historie abgeleitet.
 function computeBestStreak(profile) {
   const progress = profile.questProgress || {};
-  const dateSet = new Set([
-    ...Object.keys(progress).filter(d => progress[d] && Object.keys(progress[d]).length > 0),
-    ...(profile.streakFreezeUsedDates || []),
-  ]);
-  const dates = [...dateSet].sort();
+  const dates = Object.keys(progress).filter(d => progress[d] && Object.keys(progress[d]).length > 0).sort();
   if (dates.length === 0) return 0;
   let best = 1, current = 1;
   for (let i = 1; i < dates.length; i++) {
@@ -1400,40 +1339,6 @@ function computeBestStreak(profile) {
     best = Math.max(best, current);
   }
   return best;
-}
-
-// Streak retten: stellt die längste je erreichte Streak wieder her, indem die
-// fehlenden Tage vor der aktuellen Kette rückwirkend als geschützt markiert werden.
-// Gibt zurück, wie viele Tage dadurch gewonnen würden (0 = nichts zu retten).
-function streakRestoreInfo(profile) {
-  const best = computeBestStreak(profile);
-  const current = computeStreak(profile);
-  const missing = best - current;
-  return { best, current, missing: missing > 0 ? missing : 0 };
-}
-
-// Ältester Tag der aktuell laufenden Streak-Kette (oder gestern, wenn keine Kette läuft).
-function currentStreakStartDate(profile) {
-  const progress = profile.questProgress || {};
-  const frozen = new Set(profile.streakFreezeUsedDates || []);
-  const hasEntries = d => (progress[d] && Object.keys(progress[d]).length > 0) || frozen.has(d);
-  let date = todayBerlin();
-  if (!hasEntries(date)) date = addDays(date, -1);
-  if (!hasEntries(date)) return date; // gar keine Kette → hier beginnt die Rekonstruktion
-  while (hasEntries(addDays(date, -1))) date = addDays(date, -1);
-  return date;
-}
-
-// Gibt es eine frische Lücke (gestern nichts erledigt), die direkt an eine vorher bestehende
-// Streak-Kette grenzt? Basis für automatisches Einfrieren per Streak-Freeze.
-function hasRepairableStreakGap(profile) {
-  const today = todayBerlin();
-  const yesterday = addDays(today, -1);
-  const progress = profile.questProgress || {};
-  const frozen = new Set(profile.streakFreezeUsedDates || []);
-  const hasEntries = d => (progress[d] && Object.keys(progress[d]).length > 0) || frozen.has(d);
-  if (hasEntries(yesterday)) return false; // gestern war schon ok, nichts kaputt
-  return hasEntries(addDays(yesterday, -1));
 }
 
 // ============================================================
@@ -1548,10 +1453,7 @@ function calcAvailableVacation(work) {
 
 function calcCurrentSessionMinutes(work) {
   if (!work.clockedIn || !work.sessionStart) return 0;
-  const nowMs = Date.now();
-  const pausedMs = (work.pausedMinutesToday || 0) * 60000;
-  const currentPauseMs = work.pauseStart ? (nowMs - work.pauseStart) : 0;
-  return Math.max(0, (nowMs - work.sessionStart - pausedMs - currentPauseMs) / 60000);
+  return Math.max(0, (Date.now() - work.sessionStart) / 60000);
 }
 
 function formatHM(minutes) {
@@ -1612,11 +1514,7 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
   const deadline = (profile.questDeadlines || {})[questId];
   const hasActiveFrist = deadline && deadline.date >= today && stage === 'komplett';
   const baseGained = hasActiveFrist ? delta : Math.min(delta, headroom);
-  // 2x-XP-Boost (aus dem Shop gekauft, gilt für den ganzen Tag): verdoppelt das tatsächlich
-  // vergebene XP, aber das Tages-Limit wird weiterhin anhand des Basis-Betrags geführt —
-  // sonst würde der Boost selbst das eigene Limit auffressen und nichts mehr bringen.
-  const isDoubleXp = profile.doubleXpDate === today;
-  const gained = isDoubleXp ? baseGained * 2 : baseGained;
+  const gained = baseGained;
 
   const levelBefore = profile.level;
   grantXp(profile, gained);
@@ -1628,7 +1526,7 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
   if (!profile.xpGrantedFor[today]) profile.xpGrantedFor[today] = {};
   profile.xpGrantedFor[today][questId] = (profile.xpGrantedFor[today][questId] || 0) + gained;
 
-  addLog(state, `📜 ${profile.name}: "${quest.title}" (${stage === 'kurz' ? 'kurz begonnen' : 'komplett'}) — +${gained} XP${isDoubleXp ? ' (2x)' : ''}${baseGained < delta ? ' (Tages-XP-Limit erreicht)' : ''}.`);
+  addLog(state, `📜 ${profile.name}: "${quest.title}" (${stage === 'kurz' ? 'kurz begonnen' : 'komplett'}) — +${gained} XP${baseGained < delta ? ' (Tages-XP-Limit erreicht)' : ''}.`);
 
   // Eine Quest darf pro Tag nur EINE Kampf-Aktion auslösen — auch wenn sie
   // erst "kurz" und später am selben Tag "komplett" abgeschlossen wird.
@@ -1666,11 +1564,7 @@ function uncompleteQuestStage(state, profileId, questId) {
   if (grantedToday > 0) {
     revokeXp(profile, grantedToday);
     if (profile.questXpToday && profile.questXpToday.date === today) {
-      // Tages-Limit wurde nur mit dem Basis-Betrag (vor 2x-XP-Verdopplung) belastet —
-      // beim Zurücknehmen entsprechend auch nur den Basis-Betrag wieder freigeben.
-      const isDoubleXp = profile.doubleXpDate === today;
-      const baseGrantedToday = isDoubleXp ? grantedToday / 2 : grantedToday;
-      profile.questXpToday.amount = Math.max(0, profile.questXpToday.amount - baseGrantedToday);
+      profile.questXpToday.amount = Math.max(0, profile.questXpToday.amount - grantedToday);
     }
   }
   if (profile.xpGrantedFor && profile.xpGrantedFor[today]) delete profile.xpGrantedFor[today][questId];
@@ -2416,7 +2310,7 @@ function ProfileSelectScreen({ profiles, onSelect, onCreateNew }) {
       </div>
       {profiles.length < 2 && (
         <div className="text-xs text-inkDim mt-8 max-w-xs text-center">
-          Mit einem zweiten Profil können Shop-Käufe gemeinsam bestätigt und Gold aufgeteilt werden.
+          Mit einem zweiten Profil könnt ihr gemeinsam Quests erledigen und den Boss zusammen bekämpfen.
         </div>
       )}
     </div>
@@ -2996,397 +2890,6 @@ function QuestDeadlineModal({ quest, existing, onSave, onDelete, onClose }) {
   );
 }
 
-const FREIZEIT_CATS = ['YouTube', 'Film/Serie', 'Musik/Podcast', 'Gaming'];
-
-function CategoryDropdown({ value, categories, customCats, onChange, onDelete }) {
-  const [open, setOpen] = useState(false);
-  const [confirmCat, setConfirmCat] = useState(null);
-
-  return (
-    <div className="relative flex-1">
-      <button type="button" onClick={() => setOpen(o => !o)}
-        className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink text-left flex items-center justify-between">
-        <span>{value}</span>
-        <span className="text-inkDim text-xs ml-2">▾</span>
-      </button>
-      {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-bgElevated border border-border rounded-xl overflow-hidden shadow-xl">
-          {categories.map(cat => {
-            const isCustom = customCats.includes(cat);
-            return (
-              <div key={cat} className={`flex items-center ${value === cat ? 'bg-gold/10' : 'hover:bg-surface'}`}>
-                <button type="button" onClick={() => { onChange(cat); setOpen(false); }}
-                  className="flex-1 px-3 py-2.5 text-sm text-left text-ink">
-                  {cat}
-                </button>
-                {isCustom && (
-                  <button type="button" onClick={() => setConfirmCat(cat)}
-                    className="px-3 py-2.5 text-inkDim text-base">🗑</button>
-                )}
-              </div>
-            );
-          })}
-          <div className="border-t border-border">
-            <button type="button" onClick={() => { onChange('__new__'); setOpen(false); }}
-              className="w-full px-3 py-2.5 text-sm text-inkDim text-left">
-              ➕ Neue Kategorie…
-            </button>
-          </div>
-        </div>
-      )}
-      {confirmCat && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-[60] bg-bgElevated border border-hp/50 rounded-xl p-3 shadow-xl space-y-2">
-          <div className="text-sm text-ink">„{confirmCat}" löschen?</div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => setConfirmCat(null)}
-              className="flex-1 bg-surface border border-border rounded-lg py-1.5 text-xs text-inkDim">
-              Abbrechen
-            </button>
-            <button type="button" onClick={() => { onDelete(confirmCat); setConfirmCat(null); setOpen(false); }}
-              className="flex-1 bg-hp text-ink rounded-lg py-1.5 text-xs font-semibold">
-              Löschen
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-const FORGET_REASONS = ['Eingeschlafen', 'Komplett vergessen', 'Wurde abgelenkt / unterbrochen', 'Sonstiges'];
-
-function FreizeitStopModal({ sessionMinutes, pendingMinutesBefore, initialCustomCategories, onConfirm }) {
-  const [customCats, setCustomCats] = useState(initialCustomCategories || []);
-  const rawMins = Math.max(0, Math.round(sessionMinutes));
-
-  // "Vergessen auszustellen"
-  const [forgiveOn, setForgiveOn] = useState(false);
-  const [forgiveMinutes, setForgiveMinutes] = useState(0);
-  const [forgiveReason, setForgiveReason] = useState('');
-
-  const forgiven = forgiveOn ? Math.min(rawMins, Math.max(0, forgiveMinutes)) : 0;
-  const totalMins = Math.max(0, rawMins - forgiven);
-
-  const allCategories = [...FREIZEIT_CATS, ...customCats].sort((a, b) => a.localeCompare(b));
-  const [entries, setEntries] = useState([{ category: allCategories[0], minutes: null }]);
-  // inline new-category state per entry index
-  const [addingFor, setAddingFor] = useState(null);
-  const [newCatInput, setNewCatInput] = useState('');
-
-  const allocatedExcludingLast = entries.slice(0, -1).reduce((s, e) => s + (Number(e.minutes) || 0), 0);
-  const remaining = Math.max(0, totalMins - allocatedExcludingLast);
-
-  function setEntry(i, patch) {
-    setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, ...patch } : e));
-  }
-
-  function handleCatChange(i, val) {
-    if (val === '__new__') { setAddingFor(i); setNewCatInput(''); }
-    else setEntry(i, { category: val });
-  }
-
-  function confirmNewCat(i) {
-    const name = newCatInput.trim();
-    if (!name) return;
-    setCustomCats(prev => prev.includes(name) ? prev : [...prev, name]);
-    setEntry(i, { category: name });
-    setAddingFor(null);
-    setNewCatInput('');
-  }
-
-  function addEntry() {
-    if (allocatedExcludingLast >= totalMins) return;
-    setEntries(prev => [...prev, { category: allCategories[0], minutes: null }]);
-  }
-
-  function removeEntry(i) {
-    if (entries.length === 1) return;
-    setEntries(prev => prev.filter((_, idx) => idx !== i));
-  }
-
-  const finalEntries = totalMins > 0 ? entries.map((e, i) =>
-    i === entries.length - 1 ? { ...e, minutes: remaining } : { ...e, minutes: Number(e.minutes) || 0 }
-  ) : [];
-
-  // Live-Vorschau der Gold-Abbuchung
-  const previewTotalMinutes = (pendingMinutesBefore || 0) + totalMins;
-  const previewHours = Math.floor(previewTotalMinutes / 60);
-
-  const canSave = !forgiveOn || forgiven === 0 || !!forgiveReason;
-
-  return (
-    <div className="fixed inset-0 z-[300] flex justify-center bg-black/30">
-    <div className="w-full max-w-md bg-bg flex flex-col overflow-hidden">
-      <div className="px-5 pt-10 pb-4 border-b border-border">
-        <h2 className="font-display font-bold text-gold text-xl">Wie hast du die Zeit genutzt?</h2>
-        <p className="text-sm text-inkDim mt-1">
-          {rawMins} Min getrackt
-          {forgiven > 0 ? ` · ${forgiven} Min nicht gezählt` : ''}
-          {previewHours > 0 ? ` · ${previewHours} G abgebucht` : ' · noch keine volle Stunde'}
-        </p>
-      </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-        {totalMins === 0 ? (
-          <p className="text-sm text-inkDim">Keine Zeit übrig, die einer Kategorie zugeordnet werden kann.</p>
-        ) : entries.map((e, i) => {
-          const isLast = i === entries.length - 1;
-          const maxMins = totalMins - entries.slice(0, i).reduce((s, x) => s + (Number(x.minutes) || 0), 0) - (isLast ? 0 : 1);
-          const cats = [...FREIZEIT_CATS, ...customCats].sort((a, b) => a.localeCompare(b));
-          return (
-            <div key={i} className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                {addingFor === i ? (
-                  <div className="flex gap-2 flex-1">
-                    <input autoFocus value={newCatInput} onChange={ev => setNewCatInput(ev.target.value)}
-                      onKeyDown={ev => { if (ev.key === 'Enter') confirmNewCat(i); }}
-                      placeholder="Kategorie-Name…"
-                      className="flex-1 bg-surface border border-gold/50 rounded-xl px-3 py-2.5 text-sm text-ink" />
-                    <button onClick={() => confirmNewCat(i)}
-                      className="bg-gold text-bg text-sm font-semibold rounded-xl px-3 py-2 active:scale-95">OK</button>
-                    <button onClick={() => setAddingFor(null)} className="text-inkDim px-2">✕</button>
-                  </div>
-                ) : (
-                  <CategoryDropdown
-                    value={e.category}
-                    categories={cats}
-                    customCats={customCats}
-                    onChange={val => handleCatChange(i, val)}
-                    onDelete={cat => {
-                      setCustomCats(prev => prev.filter(c => c !== cat));
-                      setEntries(prev => prev.map(e => e.category === cat
-                        ? { ...e, category: FREIZEIT_CATS[0] } : e));
-                    }}
-                  />
-                )}
-                {isLast ? (
-                  <div className="w-20 bg-surface border border-gold/40 rounded-xl px-3 py-2.5 text-sm font-stat text-gold text-center shrink-0">
-                    {remaining} Min
-                  </div>
-                ) : (
-                  <select value={e.minutes ?? ''} onChange={ev => setEntry(i, { minutes: Number(ev.target.value) })}
-                    className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-sm font-stat text-ink text-center shrink-0">
-                    <option value="">–</option>
-                    {Array.from({ length: maxMins }, (_, n) => n + 1).map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                )}
-                {entries.length > 1 && (
-                  <button onClick={() => removeEntry(i)} className="text-inkDim text-lg px-1 shrink-0">✕</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {totalMins > 0 && remaining > 1 && (
-          <button onClick={addEntry}
-            className="w-full border border-dashed border-border rounded-xl py-2.5 text-sm text-inkDim active:scale-[0.99]">
-            + Weitere Kategorie
-          </button>
-        )}
-
-        {/* Vergessen auszustellen */}
-        <div className="pt-2">
-          {!forgiveOn ? (
-            <button onClick={() => setForgiveOn(true)}
-              className="text-xs text-inkDim underline decoration-dotted">
-              ⏰ Ich habe vergessen, den Timer auszustellen
-            </button>
-          ) : (
-            <div className="bg-surface border border-orange/40 rounded-xl p-3 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-orange">⏰ Vergessen auszustellen</span>
-                <button onClick={() => { setForgiveOn(false); setForgiveMinutes(0); setForgiveReason(''); }}
-                  className="text-inkDim text-xs">✕</button>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-inkDim flex-1">Minuten, die nicht zählen sollen</span>
-                <input type="number" min={0} max={rawMins} value={forgiveMinutes || ''}
-                  onChange={ev => setForgiveMinutes(Math.max(0, Math.min(rawMins, Number(ev.target.value) || 0)))}
-                  placeholder="0"
-                  className="w-16 bg-bg border border-border rounded-lg px-2 py-1.5 text-sm font-stat text-ink text-center" />
-              </div>
-              <select value={forgiveReason} onChange={ev => setForgiveReason(ev.target.value)}
-                className="w-full bg-bg border border-border rounded-lg px-2.5 py-2 text-sm text-ink">
-                <option value="">Grund auswählen…</option>
-                {FORGET_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              {forgiven > 0 && !forgiveReason && (
-                <p className="text-[11px] text-hp">Bitte einen Grund auswählen.</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="px-5 pb-8 pt-3 border-t border-border">
-        <button disabled={!canSave}
-          onClick={() => onConfirm(finalEntries, customCats, forgiven > 0 ? { minutes: forgiven, reason: forgiveReason } : null)}
-          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3 text-base active:scale-[0.98]">
-          Speichern
-        </button>
-      </div>
-    </div>
-    </div>
-  );
-}
-
-/* ---- Timer Vollbild ---- */
-function FreizeitTimerScreen({ profile, onStart, onStop, onClose }) {
-  const freizeit = profile.freizeitTimer || {};
-  const [tick, setTick] = useState(0);
-  const [showStop, setShowStop] = useState(false);
-  const running = freizeit.running;
-
-  useEffect(() => {
-    if (!running) return;
-    const iv = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(iv);
-  }, [running]);
-
-  const sessionMs = running && freizeit.startedAt ? Date.now() - freizeit.startedAt : 0;
-  const totalMinutes = (freizeit.pendingMinutes || 0) + sessionMs / 60000;
-  const minutesInHour = totalMinutes % 60;
-  const displayMin = Math.floor(minutesInHour);
-  const displaySec = Math.floor((minutesInHour % 1) * 60);
-
-  const R = 110;
-  const STROKE = 14;
-  const C = 2 * Math.PI * R;
-  const fill = running ? minutesInHour / 60 : (freizeit.pendingMinutes || 0) % 60 / 60;
-  const dashOffset = C * (1 - fill);
-
-  const pendingDisplay = Math.floor((freizeit.pendingMinutes || 0) % 60);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex justify-center bg-black/30">
-      <div className="relative w-full max-w-md bg-bg flex flex-col items-center justify-between py-16 px-6 overflow-y-auto">
-      {!running && (
-        <button onClick={onClose} className="self-start text-inkDim text-sm flex items-center gap-1 active:scale-95">
-          ✕ Schließen
-        </button>
-      )}
-      {running && <div style={{ height: 24 }} />}
-
-      <div className="text-center">
-        <div className="font-display text-gold text-2xl font-bold">Auszeit</div>
-        <div className="text-inkDim text-sm mt-1 flex items-center justify-center gap-2">
-          <span className="font-stat text-gold font-bold">{profile.gold} <span className="font-display">G</span></span>
-          <span className="text-border">·</span>
-          <span>1h = 1 <span className="font-display text-gold">G</span></span>
-        </div>
-      </div>
-
-      <div className="relative" onClick={running ? () => setShowStop(true) : onStart} style={{ cursor: 'pointer' }}>
-        <svg width="260" height="260" viewBox="0 0 260 260">
-          <circle cx="130" cy="130" r={R} fill="none" stroke="#1e1e2e" strokeWidth={STROKE} />
-          <circle cx="130" cy="130" r={R} fill="none" stroke="white" strokeWidth={STROKE}
-            strokeLinecap="round"
-            strokeDasharray={C}
-            strokeDashoffset={dashOffset}
-            transform="rotate(-90 130 130)"
-            style={{ transition: running ? 'stroke-dashoffset 0.9s linear' : 'none' }} />
-          {/* Klickbare Mitte */}
-          <circle cx="130" cy="130" r="80" fill="transparent" />
-          {running ? (<>
-            <text x="130" y="118" textAnchor="middle" fill="white" fontSize="44" fontWeight="bold" fontFamily="monospace">
-              {String(displayMin).padStart(2,'0')}:{String(displaySec).padStart(2,'0')}
-            </text>
-            <text x="130" y="152" textAnchor="middle" fill="#666" fontSize="13">Min in dieser Stunde</text>
-            <text x="130" y="172" textAnchor="middle" fill="#555" fontSize="12">{totalMinutes.toFixed(0)} Min gesamt</text>
-          </>) : (<>
-            <text x="130" y="118" textAnchor="middle" fill="white" fontSize="44" fontWeight="bold" fontFamily="monospace">
-              {String(pendingDisplay).padStart(2,'0')}:00
-            </text>
-            <text x="130" y="152" textAnchor="middle" fill="#888" fontSize="15">▶</text>
-            <text x="130" y="172" textAnchor="middle" fill="#666" fontSize="13">antippen zum Starten</text>
-          </>)}
-        </svg>
-      </div>
-
-      <div style={{ height: 56 }} />
-
-      {showStop && (
-        <FreizeitStopModal
-          sessionMinutes={sessionMs / 60000}
-          pendingMinutesBefore={freizeit.pendingMinutes || 0}
-          initialCustomCategories={freizeit.customCategories || []}
-          onConfirm={(entries, customCats, forgiven) => onStop(entries, customCats, forgiven)}
-        />
-      )}
-    </div>
-    </div>
-  );
-}
-
-/* ---- Analyse ---- */
-function FreizeitAnalysis({ log, onClose }) {
-  const [range, setRange] = useState(7);
-
-  const cutoff = range === 0 ? null : (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - range);
-    return d.toISOString().slice(0, 10);
-  })();
-
-  const filtered = (log || []).filter(s => !cutoff || s.date >= cutoff);
-
-  const totals = {};
-  filtered.forEach(session => {
-    (session.entries || []).forEach(e => {
-      totals[e.category] = (totals[e.category] || 0) + (e.minutes || 0);
-    });
-  });
-  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
-  const max = sorted[0]?.[1] || 1;
-  const totalMins = sorted.reduce((s, [, m]) => s + m, 0);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 px-4" onClick={onClose}>
-      <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-4"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <span className="font-display font-bold text-gold text-lg">Freizeit-Analyse</span>
-          <button onClick={onClose} className="text-inkDim text-xl px-1">✕</button>
-        </div>
-
-        {/* Zeitraum-Filter */}
-        <div className="flex gap-2">
-          {[{ label: '7 Tage', val: 7 }, { label: '30 Tage', val: 30 }, { label: 'Max', val: 0 }].map(({ label, val }) => (
-            <button key={val} onClick={() => setRange(val)}
-              className={`flex-1 py-2 rounded-xl text-sm font-semibold border transition-colors ${
-                range === val ? 'bg-gold/20 border-gold/60 text-gold' : 'bg-surface border-border text-inkDim'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-3 max-h-64 overflow-y-auto">
-          {sorted.length === 0
-            ? <p className="text-sm text-inkDim">Keine Daten für diesen Zeitraum.</p>
-            : sorted.map(([cat, mins]) => (
-              <div key={cat}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-ink">{cat}</span>
-                  <span className="font-stat text-inkDim">{Math.floor(mins / 60)}h {mins % 60}m</span>
-                </div>
-                <div className="h-2 bg-surface rounded-full overflow-hidden">
-                  <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${(mins / max) * 100}%` }} />
-                </div>
-              </div>
-            ))
-          }
-        </div>
-
-        {totalMins > 0 && (
-          <p className="text-xs text-inkDim border-t border-border pt-3">
-            Gesamt: {Math.floor(totalMins / 60)}h {totalMins % 60}m
-            {range > 0 ? ` in den letzten ${range} Tagen` : ''}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // Karussell für Fristen — native scroll-snap für Swipe-Animation
 function DeadlineCarousel({ deadlines, onComplete }) {
@@ -3947,391 +3450,10 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
 }
 
 /* ============================================================
-   10. TAB: SHOP
+   11. TAB: MEHR (Profil, Kalender, Bibliothek, Export)
    ============================================================ */
 
-function AddShopItemModal({ category, onAdd, onClose }) {
-  const [title, setTitle] = useState('');
-  const [cost, setCost] = useState(50);
-  const [icon, setIcon] = useState('🎁');
-  return (
-    <Modal title={`Neues Item (${category === 'gemeinsam' ? 'Gemeinsam' : 'Geschenk'})`} onClose={onClose}>
-      <div className="space-y-4">
-        <div>
-          <SectionLabel>Titel</SectionLabel>
-          <input value={title} onChange={e => setTitle(e.target.value)}
-            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5" maxLength={40} />
-        </div>
-        <div>
-          <SectionLabel>Kosten (Gold)</SectionLabel>
-          <input type="number" min={1} value={cost} onChange={e => setCost(Number(e.target.value))}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 font-stat" />
-        </div>
-        <div>
-          <SectionLabel>Icon (Emoji)</SectionLabel>
-          <input value={icon} onChange={e => setIcon(e.target.value.slice(0, 2))}
-            enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-            className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
-        </div>
-        <button disabled={!title.trim()} onClick={() => onAdd({ title: title.trim(), cost: cost || 1, icon: icon || '🎁' })}
-          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
-          Hinzufügen
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function ShopItemCard({ item, category, profile, partner, onBuy }) {
-  const splitBuyer = category === 'gemeinsam' ? Math.ceil(item.cost / 2) : item.cost;
-  const affordable = profile.gold >= splitBuyer;
-  return (
-    <div className="bg-surface border border-border rounded-2xl p-3.5 flex items-center gap-3">
-      <div className="text-2xl w-9 text-center shrink-0">{item.icon}</div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-ink truncate">{item.title}</div>
-        <div className="text-xs text-inkDim font-stat">
-          {category === 'gemeinsam' ? `${item.cost}G gesamt · du zahlst ${splitBuyer}G` : `${item.cost}G`}
-        </div>
-      </div>
-      <button
-        disabled={!affordable || !partner}
-        onClick={() => onBuy(item, category, splitBuyer)}
-        className="text-xs font-semibold rounded-lg px-3 py-2 bg-gold disabled:opacity-30 text-bg active:scale-95 shrink-0"
-      >
-        Kaufen
-      </button>
-    </div>
-  );
-}
-
-function DeleteShopItemsModal({ shop, onDelete, onClose }) {
-  const [selected, setSelected] = useState(() => new Set());
-
-  function toggle(key) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  }
-
-  const sections = [
-    { key: 'gemeinsam', label: 'Gemeinsam einlösen', items: shop.gemeinsam },
-    { key: 'geschenk', label: 'Geschenk vom Partner', items: shop.geschenk },
-  ];
-
-  return (
-    <Modal title="Items löschen" onClose={onClose} wide>
-      <div className="text-xs text-inkDim mb-3">Tippe Items an, um sie auszuwählen, und lösche sie dauerhaft aus dem Katalog.</div>
-      <div className="space-y-4 max-h-[50vh] overflow-y-auto">
-        {sections.map(sec => {
-          if (sec.items.length === 0) return null;
-          return (
-            <div key={sec.key}>
-              <SectionLabel>{sec.label}</SectionLabel>
-              <div className="space-y-1.5">
-                {sec.items.map(item => {
-                  const itemKey = `${sec.key}:${item.id}`;
-                  const isSelected = selected.has(itemKey);
-                  return (
-                    <button key={item.id} onClick={() => toggle(itemKey)}
-                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
-                        isSelected ? 'border-hp bg-hp/10' : 'border-border bg-surface'
-                      }`}>
-                      <span className="text-lg shrink-0">{item.icon}</span>
-                      <span className="text-sm flex-1 min-w-0 truncate">{item.title}</span>
-                      <span className="text-[10px] text-inkDim font-stat shrink-0">{item.cost}G</span>
-                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${
-                        isSelected ? 'bg-hp border-hp text-ink' : 'border-border'
-                      }`}>{isSelected ? '✓' : ''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <button disabled={selected.size === 0} onClick={() => onDelete([...selected])}
-        className="w-full bg-hp disabled:opacity-30 text-ink font-semibold rounded-xl py-3 mt-4">
-        {selected.size > 0 ? `${selected.size} Item${selected.size > 1 ? 's' : ''} löschen` : 'Items löschen'}
-      </button>
-    </Modal>
-  );
-}
-
-// Inline-Bearbeitungs-Modal für Shop-Items: Name, Icon, Gold-Preis.
-// Ähnlich dem Quest-Edit, aber ohne Drag (keine sinnvolle Reihenfolge im Shop).
-function ShopEditModal({ shop, onSave, onClose }) {
-  const [items, setItems] = useState({
-    gemeinsam: shop.gemeinsam.map(i => ({ ...i })),
-    geschenk:  shop.geschenk.map(i => ({ ...i })),
-  });
-  const [confirm, setConfirm] = useState(null);
-  const [drag, setDrag] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);
-  const dragRef = useRef(null);
-
-  // Touch + Mouse Drag für Sortierung — einmalig beim Mount registriert.
-  useEffect(() => {
-    const getY = e => (e.changedTouches?.length ? e.changedTouches[0].clientY : e.touches?.length ? e.touches[0].clientY : e.clientY);
-    function onMove(e) {
-      if (!dragRef.current) return;
-      if (e.cancelable) e.preventDefault();
-      const newY = getY(e);
-      dragRef.current = { ...dragRef.current, currentY: newY };
-      setDrag(d => d ? { ...d, currentY: newY } : null);
-      const el = document.elementFromPoint(
-        e.touches ? e.touches[0].clientX : e.clientX,
-        e.touches ? e.touches[0].clientY : e.clientY
-      );
-      const row = el?.closest('[data-shopid]');
-      setDragOverId(row ? row.getAttribute('data-shopid') : null);
-    }
-    function onEnd(e) {
-      const d = dragRef.current;
-      if (!d) return;
-      const el = document.elementFromPoint(
-        e.changedTouches ? e.changedTouches[0].clientX : e.clientX,
-        e.changedTouches ? e.changedTouches[0].clientY : e.clientY
-      );
-      const row = el?.closest('[data-shopid]');
-      if (row) {
-        const targetId = row.getAttribute('data-shopid');
-        const cat = d.cat;
-        if (targetId !== d.id) {
-          setItems(prev => {
-            const next = [...prev[cat]];
-            const fi = next.findIndex(i => i.id === d.id);
-            const ti = next.findIndex(i => i.id === targetId);
-            if (fi >= 0 && ti >= 0) { const [item] = next.splice(fi, 1); next.splice(ti, 0, item); }
-            return { ...prev, [cat]: next };
-          });
-        }
-      }
-      dragRef.current = null;
-      setDrag(null);
-      setDragOverId(null);
-    }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onEnd);
-    document.addEventListener('touchmove', onMove, { passive: false });
-    document.addEventListener('touchend', onEnd);
-    return () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onEnd);
-      document.removeEventListener('touchmove', onMove);
-      document.removeEventListener('touchend', onEnd);
-    };
-  }, []); // einmalig beim Mount
-
-  function liveUpdate(cat, id, patch) {
-    setItems(prev => ({ ...prev, [cat]: prev[cat].map(i => i.id === id ? { ...i, ...patch } : i) }));
-  }
-
-  const sections = [
-    { key: 'gemeinsam', label: 'Gemeinsam einlösen' },
-    { key: 'geschenk', label: 'Geschenk vom Partner' },
-  ];
-
-  return (
-    <>
-    <Modal title="✏️ Shop bearbeiten" onClose={onClose} wide>
-      <div className="space-y-5 max-h-[60vh] overflow-y-auto" style={{ userSelect: drag ? 'none' : 'auto' }}>
-        {sections.map(({ key, label }) => (
-          <div key={key} className="bg-bgElevated rounded-2xl border border-border overflow-hidden">
-            <div className="flex items-center px-3 border-b border-border bg-surface" style={{ height: 44 }}>
-              <span className="text-xs font-semibold text-gold flex-1">{label}</span>
-            </div>
-            <div className="divide-y divide-border/50">
-              {items[key].length === 0 && (
-                <div className="px-3 py-2 text-xs text-inkDim">Keine Items.</div>
-              )}
-              {items[key].map(item => {
-                const isSelf = drag?.id === item.id;
-                const isDragOver = dragOverId === item.id && !isSelf;
-                return (
-                  <div key={item.id} data-shopid={item.id}
-                    className={`flex items-center gap-2 px-3 transition-colors ${isDragOver ? 'bg-gold/10' : ''} ${isSelf ? 'opacity-50' : ''}`}
-                    style={{ height: 52 }}>
-                    <div className="cursor-grab active:cursor-grabbing select-none p-1.5 -ml-1 rounded shrink-0"
-                      onMouseDown={e => { e.preventDefault(); const d = { id: item.id, cat: key, currentY: e.clientY }; dragRef.current = d; setDrag(d); }}
-                      onTouchStart={e => { e.preventDefault(); const d = { id: item.id, cat: key, currentY: e.touches[0].clientY }; dragRef.current = d; setDrag(d); }}>
-                      <GripIcon />
-                    </div>
-                    <input type="text" value={item.icon}
-                      onChange={e => liveUpdate(key, item.id, { icon: e.target.value.slice(0, 2) })}
-                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-                      className="w-12 bg-surface border border-border rounded-lg px-1.5 py-1.5 text-xl text-center shrink-0" />
-                    <input type="text" value={item.title}
-                      onChange={e => liveUpdate(key, item.id, { title: e.target.value })}
-                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-                      className="flex-1 bg-surface border border-border rounded-lg px-2.5 py-1.5 text-sm text-ink min-w-0" />
-                    <input type="text" inputMode="numeric" value={String(item.cost)}
-                      onChange={e => liveUpdate(key, item.id, { cost: Number(e.target.value.replace(/\D/g,'')) || 1 })}
-                      enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
-                      className="w-14 bg-surface border border-border rounded-lg px-2 py-1.5 text-sm font-stat text-gold text-center shrink-0" />
-                    <span className="text-sm font-bold text-gold shrink-0">G</span>
-                    <DeleteButton onDelete={() => {
-                      setItems(prev => ({ ...prev, [key]: prev[key].filter(i => i.id !== item.id) }));
-                    }} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-      <button onClick={() => onSave(items)} className="w-full bg-gold text-bg font-semibold rounded-xl py-3 mt-4 active:scale-[0.98]">
-        Speichern
-      </button>
-    </Modal>
-    </>
-  );
-}
-
-function PowerUpCard({ icon, title, subtitle, cost, disabled, active, activeLabel, onBuy, affordable }) {
-  return (
-    <div className={`bg-surface border rounded-2xl p-3.5 flex items-center gap-3 ${active ? 'border-heal/50' : 'border-border'}`}>
-      <div className="text-2xl w-9 text-center shrink-0">{icon}</div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-ink truncate">{title}</div>
-        <div className="text-xs text-inkDim leading-snug">{subtitle}</div>
-      </div>
-      {active ? (
-        <span className="text-xs font-semibold text-heal shrink-0 px-1">{activeLabel}</span>
-      ) : (
-        <button
-          disabled={disabled || !affordable}
-          onClick={onBuy}
-          className="text-xs font-semibold font-stat rounded-lg px-3 py-2 bg-gold disabled:opacity-30 text-bg active:scale-95 shrink-0"
-        >
-          {cost} G
-        </button>
-      )}
-    </div>
-  );
-}
-
-function ShopCategorySection({ title, items, category, profile, partner, onBuy, defaultOpen }) {
-  const [open, setOpen] = useState(!!defaultOpen);
-  return (
-    <div className="border border-border rounded-2xl overflow-hidden bg-surface/40">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-inkDim text-xs">{open ? '▼' : '▶'}</span>
-          <span className="font-display text-sm font-bold text-ink">{title}</span>
-        </div>
-        <span className="text-[10px] text-inkDim font-stat">{items.length}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3 space-y-2.5">
-          {items.length === 0 && <p className="text-xs text-inkDim px-1 pb-1">Noch keine Items.</p>}
-          {items.map(item => (
-            <ShopItemCard key={item.id} item={item} category={category} profile={profile} partner={partner} onBuy={onBuy} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ShopTab({ state, profile, partner, onBuy, onAddShopItem, onEditShopItems, onConfirm, onDecline, onBuyStreakFreeze, onRepairStreak, onBuyDoubleXp }) {
-  const [addCategory, setAddCategory] = useState(null);
-  const [showEdit, setShowEdit] = useState(false);
-  const myConfirmations = state.pendingConfirmations.filter(c => c.partnerId === profile.id);
-
-  const today = todayBerlin();
-  const freezeCount = profile.streakFreezes || 0;
-  const freezeMaxed = freezeCount >= STREAK_FREEZE_CAP;
-  const restoreInfo = streakRestoreInfo(profile);
-  const canRepair = restoreInfo.missing > 0;
-  const doubleXpActive = profile.doubleXpDate === today;
-
-  return (
-    <div className="px-4 pt-4 pb-28 space-y-6">
-      {myConfirmations.map(c => (
-        <div key={c.id} className="bg-gold/10 border border-gold/40 rounded-2xl p-4 slide-up">
-          <div className="text-sm text-ink mb-1">
-            <strong>{state.profiles.find(p => p.id === c.buyerId)?.name}</strong> möchte "{c.title}" kaufen
-            {c.category === 'geschenk' ? ' — und du sollst es erfüllen.' : ' (gemeinsam, ihr teilt euch die Kosten).'}
-          </div>
-          <div className="text-xs text-inkDim mb-3 font-stat">Dein Anteil: {c.partnerPaid}G</div>
-          <div className="flex gap-2">
-            <button onClick={() => onConfirm(c.id)} className="flex-1 bg-heal text-bg font-semibold rounded-xl py-2 text-sm active:scale-95">Bestätigen</button>
-            <button onClick={() => onDecline(c.id)} className="flex-1 bg-surface2 border border-border text-ink rounded-xl py-2 text-sm active:scale-95">Ablehnen</button>
-          </div>
-        </div>
-      ))}
-
-      <div>
-        <div className="font-display text-sm font-bold text-ink mb-2">⚡ Power-Ups</div>
-        <div className="space-y-2.5">
-          <PowerUpCard
-            icon="❄️" title="Streak auf Eis"
-            subtitle={freezeMaxed ? `${freezeCount}/${STREAK_FREEZE_CAP} vorhanden — auf Lager voll` : `${freezeCount}/${STREAK_FREEZE_CAP} vorhanden — schützt automatisch einen verpassten Tag`}
-            cost={STREAK_FREEZE_COST} disabled={freezeMaxed} affordable={profile.gold >= STREAK_FREEZE_COST}
-            onBuy={onBuyStreakFreeze}
-          />
-          <PowerUpCard
-            icon="🔧" title="Streak retten"
-            subtitle={canRepair
-              ? `Stellt deine Bestmarke wieder her: ${restoreInfo.current} → ${restoreInfo.best} Tage (+${restoreInfo.missing})`
-              : 'Deine Streak ist bereits auf Bestmarke — nichts zu retten'}
-            cost={STREAK_REPAIR_COST} disabled={!canRepair} affordable={profile.gold >= STREAK_REPAIR_COST}
-            onBuy={onRepairStreak}
-          />
-          <PowerUpCard
-            icon="✨" title="2x XP"
-            subtitle={doubleXpActive ? 'Aktiv bis Mitternacht' : 'Verdoppelt deine Quest-XP für den Rest des Tages'}
-            cost={DOUBLE_XP_COST} active={doubleXpActive} activeLabel="Aktiv ✓" affordable={profile.gold >= DOUBLE_XP_COST}
-            onBuy={onBuyDoubleXp}
-          />
-        </div>
-      </div>
-
-      <div className="space-y-3">
-        <ShopCategorySection title="Gemeinsam einlösen" items={state.shop.gemeinsam} category="gemeinsam"
-          profile={profile} partner={partner} onBuy={onBuy} defaultOpen={true} />
-        <ShopCategorySection title="Geschenk vom Partner" items={state.shop.geschenk} category="geschenk"
-          profile={profile} partner={partner} onBuy={onBuy} defaultOpen={true} />
-      </div>
-
-      <div className="flex gap-2">
-        <button onClick={() => setAddCategory('gemeinsam')}
-          className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
-          + Gemeinsames Item
-        </button>
-        <button onClick={() => setAddCategory('geschenk')}
-          className="flex-1 border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
-          + Geschenk-Item
-        </button>
-        <button onClick={() => setShowEdit(true)}
-          className="w-12 border border-dashed border-border rounded-2xl py-3 text-base text-inkDim active:scale-[0.99]"
-          aria-label="Shop bearbeiten">✏️</button>
-      </div>
-
-      {addCategory && (
-        <AddShopItemModal category={addCategory} onClose={() => setAddCategory(null)}
-          onAdd={(item) => { onAddShopItem(addCategory, item); setAddCategory(null); }} />
-      )}
-      {showEdit && (
-        <ShopEditModal shop={state.shop} onClose={() => setShowEdit(false)}
-          onSave={(items) => { onEditShopItems(items); setShowEdit(false); }} />
-      )}
-    </div>
-  );
-}
-
-
-
-/* ============================================================
-   11. TAB: MEHR (Profil, Kalender, Bibliothek, Inventar, Export)
-   ============================================================ */
-
-function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, selectedDate, onSelectDate, birthdays }) {
+function CalendarGrid({ profile, quests, calendarItems, selectedDate, onSelectDate, birthdays }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [slideDir, setSlideDir] = useState('right'); // Richtung der letzten Monats-Animation
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -4418,7 +3540,6 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
             const dayEntries = calendarByDate[dateStr] || [];
             const hasAufgabe = dayEntries.some(e => e.item.kind === 'aufgabe' && !e.done);
             const hasTermin = dayEntries.some(e => e.item.kind === 'termin' && !e.done);
-            const hasPlannedItem = !!(plannedItemDates && plannedItemDates.has(dateStr));
             const hasSport = profile.sportTrackingEnabled && !!(profile.sportLog && profile.sportLog[dateStr] &&
               (profile.sportLog[dateStr].calories != null || profile.sportLog[dateStr].protein != null || profile.sportLog[dateStr].weight != null));
             const [bYear, bMonth, bDay] = dateStr.split('-').map(Number);
@@ -4456,7 +3577,6 @@ function CalendarGrid({ profile, quests, calendarItems, plannedItemDates, select
                   {done && <span className="w-1.5 h-1.5 rounded-full bg-heal"></span>}
                   {hasAufgabe && <span className="w-1.5 h-1.5 rounded-full bg-orange"></span>}
                   {hasTermin && <span className="w-1.5 h-1.5 rounded-full bg-shield"></span>}
-                  {hasPlannedItem && <span className="w-1.5 h-1.5 rounded-full bg-gold"></span>}
                   {hasSport && <span className="w-1.5 h-1.5 rounded-full bg-sport"></span>}
                   {hasBirthday && <span className="w-1.5 h-1.5 rounded-full bg-birthday"></span>}
                   {hasDeadline && <span className="w-1.5 h-1.5 rounded-full bg-hp flex items-center justify-center text-[6px] text-white font-bold leading-none">!</span>}
@@ -4596,127 +3716,6 @@ function ItemDateModal({ item, onSave, onClose }) {
   );
 }
 
-function InventoryList({ profile, sharedInventory, onMarkDone, onSetDate }) {
-  const [dateItem, setDateItem] = useState(null);
-  const personal = (profile.inventory || []).filter(item => !item.done);
-  const shared = (sharedInventory || []).filter(item => !item.done);
-
-  function ItemCard({ item, scope }) {
-    return (
-      <div className="bg-surface border border-border rounded-2xl overflow-hidden">
-        <div className="flex items-stretch">
-          <div className="flex items-center justify-center w-16 shrink-0 bg-bgElevated border-r border-border text-3xl">
-            {item.icon || '🎁'}
-          </div>
-          <div className="flex-1 min-w-0 px-3 py-2.5 flex flex-col justify-center gap-0.5">
-            <div className="text-sm font-medium text-ink leading-snug">{item.title}</div>
-            <div className="flex items-center gap-2 flex-wrap mt-0.5">
-              {item.cost != null && (
-                <span className="text-[10px] font-stat text-gold bg-gold/10 border border-gold/30 rounded-full px-2 py-0.5">
-                  {item.cost} 🪙
-                </span>
-              )}
-              {item.plannedDate ? (
-                <button onClick={() => setDateItem({ scope, item })}
-                  className="text-[10px] font-stat text-shield bg-shield/10 border border-shield/30 rounded-full px-2 py-0.5 active:opacity-70">
-                  📅 {formatShortDate(item.plannedDate)}
-                </button>
-              ) : (
-                <button onClick={() => setDateItem({ scope, item })}
-                  className="text-[10px] text-inkDim border border-dashed border-border rounded-full px-2 py-0.5 active:opacity-70">
-                  + Datum
-                </button>
-              )}
-            </div>
-          </div>
-          <button onClick={() => onMarkDone(scope, item.id)}
-            title="Als erledigt markieren"
-            className="flex items-center justify-center w-14 shrink-0 border-l border-border text-heal text-xl active:bg-heal/10 transition-colors">
-            ✓
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <SectionLabel>Deine Geschenke (zu erfüllen)</SectionLabel>
-        {personal.length === 0
-          ? <div className="text-xs text-inkDim">Noch nichts hier.</div>
-          : <div className="space-y-2">{personal.map(item => <ItemCard key={item.id} item={item} scope="personal" />)}</div>}
-      </div>
-      <div>
-        <SectionLabel>Gemeinsamer Bereich</SectionLabel>
-        {shared.length === 0
-          ? <div className="text-xs text-inkDim">Noch nichts hier.</div>
-          : <div className="space-y-2">{shared.map(item => <ItemCard key={item.id} item={item} scope="shared" />)}</div>}
-      </div>
-      {dateItem && (
-        <ItemDateModal item={dateItem.item} onClose={() => setDateItem(null)}
-          onSave={(date) => { onSetDate(dateItem.scope, dateItem.item.id, date); setDateItem(null); }} />
-      )}
-    </div>
-  );
-}
-
-// Protokoll für den Inventar-Tab: "Erledigt" = abgeschlossene gemeinsame
-// Aktivitäten (gemeinsamer Bereich), "Bekommen" = erfüllte persönliche
-// Geschenke beider Profile, jeweils mit Empfänger gekennzeichnet.
-function InventoryLogList({ profile, partner, sharedInventory, onUnmarkDone }) {
-  const [open, setOpen] = useState(false);
-
-  // Erledigt = alle gemeinsamen Items die abgehakt wurden + eigene persönliche Items
-  const erledigt = [
-    ...(sharedInventory || []).filter(i => i.done).map(i => ({ ...i, scope: 'shared' })),
-    ...(profile.inventory || []).filter(i => i.done).map(i => ({ ...i, scope: 'personal' })),
-  ];
-  // Bekommen = Items die der Partner für mich erfüllt hat (in partner.inventory abgehakt)
-  const bekommen = partner ? (partner.inventory || []).filter(i => i.done) : [];
-
-  return (
-    <div className="mt-4">
-      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-xs text-inkDim py-2">
-        <span>{open ? '▼' : '▶'} Protokoll</span>
-        <span className="font-stat">{erledigt.length + bekommen.length} Einträge</span>
-      </button>
-      {open && (
-        <div className="space-y-4 mt-1">
-          <div>
-            <SectionLabel>✅ Erledigt</SectionLabel>
-            {erledigt.length === 0 && <div className="text-xs text-inkDim pb-1">Noch nichts erledigt.</div>}
-            <div className="space-y-1.5">
-              {erledigt.map(item => (
-                <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
-                  <span className="text-base shrink-0 opacity-70">{item.icon}</span>
-                  <span className="text-sm text-inkDim flex-1 truncate">{item.title}</span>
-                  <button onClick={() => onUnmarkDone(item.scope, item.id)}
-                    title="Rückgängig machen" className="text-xs font-semibold rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95 shrink-0">
-                    ↺
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <SectionLabel>🎁 Bekommen</SectionLabel>
-            {bekommen.length === 0 && <div className="text-xs text-inkDim pb-1">Noch nichts bekommen.</div>}
-            <div className="space-y-1.5">
-              {bekommen.map(item => (
-                <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface/40 px-3 py-2.5">
-                  <span className="text-base shrink-0 opacity-70">{item.icon}</span>
-                  <span className="text-sm text-inkDim flex-1 truncate">{item.title}</span>
-                  <span className="text-heal text-sm shrink-0">✓</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function UiScaleSetting() {
   const [scale, setScale] = useState(() => getStoredUiScale());
@@ -4872,7 +3871,7 @@ function BirthdaysSection({ birthdays, activeProfileId, onAdd, onDelete }) {
   );
 }
 
-function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleFreizeit, onShowFreizeitAnalysis, onToggleWork, onUpdateWorkSettings, onShowWorkAnalysis, onAddBirthday, onDeleteBirthday, onResetAbilityUpgrades }) {
+function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onEditProfile, onExport, onImport, onUnpair, onToggleSportTracking, onToggleWork, onUpdateWorkSettings, onShowWorkAnalysis, onAddBirthday, onDeleteBirthday }) {
   const [section, setSection] = useState('profil');
   const [confirmUnpair, setConfirmUnpair] = useState(false);
   const [showSportAnalysis, setShowSportAnalysis] = useState(false);
@@ -4918,24 +3917,6 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
           {state.profiles.length > 1 && (
             <button onClick={onSwitchProfile} className="w-full bg-surface border border-border rounded-xl py-2.5 text-sm text-inkDim">
               Profil wechseln
-            </button>
-          )}
-          <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
-            <div className="pr-3">
-              <div className="text-sm font-medium text-ink">⏱️ Freizeit-Timer</div>
-              <div className="text-xs text-inkDim mt-1 leading-relaxed">
-                Trackt deine Auszeit und bucht automatisch 1 G pro Stunde ab. Minuten werden über Tage angespart.
-              </div>
-            </div>
-            <button onClick={onToggleFreizeit}
-              className={`w-11 h-6 rounded-full relative shrink-0 transition-colors ${profile.freizeitEnabled ? 'bg-gold' : 'bg-border'}`}>
-              <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.freizeitEnabled ? 'left-5' : 'left-0.5'}`}></span>
-            </button>
-          </div>
-          {profile.freizeitEnabled && (
-            <button onClick={onShowFreizeitAnalysis}
-              className="w-full border border-dashed border-gold/50 rounded-2xl py-3 text-sm text-gold active:scale-[0.99]">
-              📊 Freizeit-Analyse
             </button>
           )}
           <div className="flex items-center justify-between bg-surface border border-border rounded-2xl px-4 py-3.5">
@@ -5040,17 +4021,6 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
           </button>
           <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
             onChange={e => { if (e.target.files[0]) onImport(e.target.files[0]); e.target.value = ''; }} />
-
-          <div className="border border-hp/30 rounded-xl p-3.5 space-y-2">
-            <div className="text-xs font-semibold text-hp">Einmaliger Ability-Reset</div>
-            <div className="text-xs text-inkDim leading-relaxed">
-              Setzt alle Ability-Upgrades für alle Profile zurück und berechnet die Punkte sauber neu aus der tatsächlichen Streak. Nur einmal nötig um den Bug zu beheben.
-            </div>
-            <button onClick={onResetAbilityUpgrades}
-              className="w-full bg-hp/10 border border-hp/40 text-hp rounded-xl py-2.5 text-sm font-semibold active:scale-[0.99]">
-              ⚠️ Ability-Upgrades für alle Profile zurücksetzen
-            </button>
-          </div>
         </div>
       )}
       {showSportAnalysis && (
@@ -5078,13 +4048,24 @@ function useBackButton(isOpen, onClose) {
 const WEEK_DAYS = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 
 function WorkSettings({ work, onChange }) {
-  function set(key, val) { onChange({ ...work, [key]: val }); }
+  // Sendet NUR das geänderte Feld (nicht das komplette work-Objekt) — verhindert,
+  // dass ein Feld ein anderes überschreibt, falls beide kurz hintereinander geändert
+  // werden, bevor der aktualisierte "work"-Prop hier zurückkommt.
+  function set(key, val) { onChange({ [key]: val }); }
   function toggleDay(d) {
     const days = work.workDays || [1,2,3,4,5];
     set('workDays', days.includes(d) ? days.filter(x => x !== d) : [...days, d].sort());
   }
   const [hoursStr, setHoursStr] = useState(String(work.hoursPerDay ?? 8));
   const [vacStr, setVacStr] = useState(String(work.vacationDaysPerYear ?? 30));
+  const [startDateStr, setStartDateStr] = useState(work.startDate || '');
+
+  // Bei externer Änderung (z. B. Partner-Sync oder Import) die Anzeige aktuell halten —
+  // sonst zeigt das Feld weiter den alten Wert, bis man es manuell anfasst.
+  useEffect(() => { setHoursStr(String(work.hoursPerDay ?? 8)); }, [work.hoursPerDay]);
+  useEffect(() => { setVacStr(String(work.vacationDaysPerYear ?? 30)); }, [work.vacationDaysPerYear]);
+  useEffect(() => { setStartDateStr(work.startDate || ''); }, [work.startDate]);
+
   return (
     <div className="space-y-4">
       <div>
@@ -5114,12 +4095,6 @@ function WorkSettings({ work, onChange }) {
             className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
         </div>
         <div>
-          <div className="text-xs text-inkDim mb-1.5">Arbeitsbeginn (spätestens)</div>
-          <input type="time" value={work.startTime||'09:30'}
-            onChange={e => set('startTime', e.target.value)}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
-        </div>
-        <div>
           <div className="text-xs text-inkDim mb-1.5">Urlaubstage/Jahr</div>
           <input type="text" inputMode="numeric" value={vacStr}
             onChange={e => setVacStr(e.target.value)}
@@ -5132,16 +4107,31 @@ function WorkSettings({ work, onChange }) {
         </div>
         <div>
           <div className="text-xs text-inkDim mb-1.5">Anstellungsbeginn</div>
-          <input type="date" value={work.startDate||''}
-            onChange={e => set('startDate', e.target.value || null)}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+          <div className="flex gap-2">
+            <input type="date" value={startDateStr}
+              onChange={e => setStartDateStr(e.target.value)}
+              onBlur={() => {
+                // Nur einen vollständigen Datumswert übernehmen — ein leerer
+                // Zwischenwert (manche Android-Datumswähler feuern das während
+                // der Auswahl) darf NICHT versehentlich das Feld löschen.
+                if (/^\d{4}-\d{2}-\d{2}$/.test(startDateStr)) set('startDate', startDateStr);
+                else setStartDateStr(work.startDate || '');
+              }}
+              className="flex-1 bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink" />
+            {work.startDate && (
+              <button onClick={() => { setStartDateStr(''); set('startDate', null); }}
+                className="text-xs text-inkDim border border-border rounded-xl px-3 active:scale-95">
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClockOut, onAddSickDay, onDeleteSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
+function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay, onDeleteSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
   const work = profile.work || {};
 
   // ---- alle Hooks zuerst ----
@@ -5181,7 +4171,6 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   // An Urlaubs- und Kranktagen gilt das Soll als erfüllt → alles Gearbeitete zählt als Überstunden
   const isFreeDay = !isWorkDay || isSick || isVacation;
   const requiredMins = isFreeDay ? 0 : (work.hoursPerDay || 8) * 60;
-  const isPaused = !!work.pauseStart;
 
   // Gesamt-Tagesleistung = frühere Sitzungen + aktuelle Sitzung
   const workedBefore = work.workedMinutesToday || 0;
@@ -5202,7 +4191,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
   const notStartedYet = work.startDate && todayBerlin() < work.startDate;
 
   function handleStop() {
-    onClockOut({ sessionMins, reqMins: requiredMins });
+    onClockOut();
   }
 
   return (
@@ -5211,36 +4200,30 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
         {/* Header */}
         <div className="w-full flex items-center justify-between">
           <button onClick={onClose} className="text-inkDim text-sm">✕ Schließen</button>
-          <div className="flex flex-col items-center gap-1">
-            <div className="font-display font-bold text-gold text-xl">Arbeitszeit</div>
-            <div className="flex gap-2">
-              {isSick && <div className="text-xs text-hp">🤒 Krank</div>}
-              {isVacation && !isSick && <div className="text-xs text-[#c026d3]">🌴 Urlaub</div>}
-            </div>
-            <div className="flex gap-2 mt-0.5">
-              <button onClick={() => setShowSick(true)} className="text-xs text-inkDim border border-border rounded-lg px-2.5 py-1 active:scale-95">
-                🤒 Krank
-              </button>
-              <button onClick={() => setShowVacation(true)} className="text-xs text-inkDim border border-border rounded-lg px-2.5 py-1 active:scale-95">
-                🌴 Urlaub
-              </button>
-            </div>
-          </div>
+          <div className="font-display font-bold text-gold text-xl">Arbeitszeit</div>
           <div style={{ width: 60 }} className="flex justify-end">
             <button onClick={() => {
-                const today = new Date().toISOString().slice(0,10);
-                const todayLogs = (work.workLog||[]).filter(e=>e.date===today&&e.type==='work');
-                if (!work.clockedIn && todayLogs.length===0) { onReset('none'); return; }
-                const msg = work.clockedIn
-                  ? 'Laufenden Timer zurücksetzen? Die bisherige Zeit wird nicht gebucht.'
-                  : `Heutigen Arbeitstag zurücksetzen?\n${todayLogs.map(e=>`${e.clockIn}–${e.clockOut} (${e.overtimeDelta>=0?'+':''}${Math.round(e.overtimeDelta)} Min)`).join(', ')} wird rückgängig gemacht.`;
-                setResetConfirmMsg(msg);
+                const hasProgress = work.clockedIn || (work.workedMinutesToday || 0) > 0;
+                if (!hasProgress) { onReset('none'); return; }
+                setResetConfirmMsg(`Heutigen Fortschritt zurücksetzen?\n${formatHM(totalWorkedToday)} werden verworfen — es wurde noch nichts gebucht.`);
                 setShowResetConfirm(true);
               }}
               className="text-xs text-hp border border-hp/30 rounded-lg px-2 py-1 active:scale-95">
               ↺ Reset
             </button>
           </div>
+        </div>
+
+        {/* Krank / Urlaub */}
+        <div className="flex gap-3 mt-2">
+          <button onClick={() => setShowSick(true)}
+            className={`text-sm border rounded-xl px-4 py-2.5 active:scale-95 ${isSick ? 'border-hp/60 bg-hp/10 text-hp' : 'border-border text-inkDim'}`}>
+            🤒 Krank
+          </button>
+          <button onClick={() => setShowVacation(true)}
+            className={`text-sm border rounded-xl px-4 py-2.5 active:scale-95 ${isVacation ? 'border-[#c026d3]/60 bg-[#c026d3]/10 text-[#c026d3]' : 'border-border text-inkDim'}`}>
+            🌴 Urlaub
+          </button>
         </div>
 
         {/* Ring */}
@@ -5252,7 +4235,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
             <div className="text-xs text-inkDim text-center">Du kannst dich erst ab diesem Datum einstempeln.</div>
           </div>
         ) : (
-        <div onClick={work.clockedIn ? (isPaused ? onResume : () => setShowStopConfirm(true)) : onClockIn}
+        <div onClick={work.clockedIn ? () => setShowStopConfirm(true) : onClockIn}
           className="relative cursor-pointer">
           <svg width="260" height="260" viewBox="0 0 260 260">
             <circle cx="130" cy="130" r={R} fill="none" stroke="#1e1e2e" strokeWidth={STROKE} />
@@ -5262,63 +4245,59 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               style={{ transition: 'stroke-dashoffset 0.9s linear, stroke 0.5s' }} />
             <circle cx="130" cy="130" r="80" fill="transparent" />
             {work.clockedIn ? (<>
-              <text x="130" y="112" textAnchor="middle" fill="white" fontSize="42" fontWeight="bold" fontFamily="monospace">
+              <text x="130" y="120" textAnchor="middle" fill="white" fontSize="42" fontWeight="bold" fontFamily="monospace">
                 {String(displayHrs).padStart(2,'0')}:{String(displayMins).padStart(2,'0')}
               </text>
-              <text x="130" y="140" textAnchor="middle" fill="#555" fontSize="18" fontFamily="monospace">
+              <text x="130" y="148" textAnchor="middle" fill="#555" fontSize="18" fontFamily="monospace">
                 :{String(displaySecs).padStart(2,'0')}
               </text>
-              <text x="130" y="162" textAnchor="middle" fill="#666" fontSize="12">
-                {isPaused ? '⏸ Pause — tippen zum Fortsetzen' : !isFreeDay ? `Tagesziel: ${formatHM(requiredMins)} · tippen zum Stoppen` : isSick ? 'Krank — alles → Überstunden' : isVacation ? 'Urlaub — alles → Überstunden' : 'Freier Tag — alles → Überstunden'}
-              </text>
-              {work.clockedIn && !isPaused && !isFreeDay && totalWorkedToday < requiredMins && (
-                <text x="130" y="178" textAnchor="middle" fill="#e55353" fontSize="11">{`noch ${formatHM(requiredMins - totalWorkedToday)}`}</text>
+              {!isFreeDay && totalWorkedToday < requiredMins && (
+                <text x="130" y="172" textAnchor="middle" fill="#e55353" fontSize="12">{`noch ${formatHM(requiredMins - totalWorkedToday)}`}</text>
               )}
-              {work.clockedIn && !isPaused && !isFreeDay && totalWorkedToday >= requiredMins && (
-                <text x="130" y="178" textAnchor="middle" fill="#4a9b6e" fontSize="11">Tagesziel erreicht ✓</text>
+              {!isFreeDay && totalWorkedToday >= requiredMins && (
+                <text x="130" y="172" textAnchor="middle" fill="#4a9b6e" fontSize="12">Tagesziel erreicht ✓</text>
+              )}
+              {isFreeDay && (
+                <text x="130" y="172" textAnchor="middle" fill="#4a9b6e" fontSize="12">
+                  {isSick ? 'Krank → Überstunden' : isVacation ? 'Urlaub → Überstunden' : 'Freier Tag → Überstunden'}
+                </text>
               )}
             </>) : (<>
-              <text x="130" y="125" textAnchor="middle" fill="white" fontSize="15">▶</text>
-              <text x="130" y="148" textAnchor="middle" fill="#888" fontSize="13">Antippen zum Einstempeln</text>
+              <text x="130" y="115" textAnchor="middle" fill="white" fontSize="15">▶</text>
+              <text x="130" y="140" textAnchor="middle" fill="#888" fontSize="13">
+                {workedBefore > 0 ? 'Antippen zum Fortsetzen' : 'Antippen zum Einstempeln'}
+              </text>
+              {workedBefore > 0 && (
+                <text x="130" y="160" textAnchor="middle" fill="#d4a843" fontSize="12">{`Bisher heute: ${formatHM(workedBefore)}`}</text>
+              )}
             </>)}
           </svg>
         </div>
         )}
 
         {/* Infoleiste */}
-        <div className="w-full space-y-2">
-          {work.clockedIn && (
-            <div className="flex gap-2">
-              {isPaused ? (
-                <button onClick={onResume}
-                  className="flex-1 bg-gold/20 border border-gold/50 text-gold rounded-xl py-3 text-sm font-semibold active:scale-95">
-                  ▶ Fortsetzen
-                </button>
-              ) : (
-                <button onClick={onPause}
-                  className="flex-1 bg-surface border border-border text-inkDim rounded-xl py-3 text-sm font-semibold active:scale-95">
-                  ⏸ Pause
-                </button>
-              )}
-              <button onClick={() => setShowStopConfirm(true)}
-                className="flex-1 bg-surface border border-border text-ink rounded-xl py-3 text-sm font-semibold active:scale-95">
-                ⏹ Ausstempeln
-              </button>
+        <div className="w-full grid grid-cols-2 gap-3">
+          <div className="bg-surface border border-border rounded-2xl p-3.5 flex flex-col gap-2">
+            <div className="text-[10px] text-inkDim uppercase tracking-wide">Überstundenkonto</div>
+            <div className={`font-stat text-lg font-bold ${work.overtimeMinutes >= 0 ? 'text-heal' : 'text-hp'}`}>
+              {formatHM(work.overtimeMinutes||0)}
             </div>
-          )}
-          <div className="flex justify-between text-xs text-inkDim px-1 items-center">
-            <span>Überstundenkonto: <span className={work.overtimeMinutes >= 0 ? 'text-heal' : 'text-hp'}>{formatHM(work.overtimeMinutes||0)}</span></span>
             <button onClick={() => { setBuyOTAmount(1); setShowBuyOT(true); }}
               disabled={profile.gold < 1}
-              className="flex items-center gap-1 border border-gold/40 bg-gold/10 text-gold rounded-lg px-2 py-1 disabled:opacity-30 active:scale-95 text-[10px] font-semibold">
-              G → Min
+              className="flex items-center justify-center gap-1.5 border border-gold/40 bg-gold/10 text-gold rounded-xl py-2 disabled:opacity-30 active:scale-95 text-xs font-semibold">
+              <span>💰</span> G → Min
             </button>
-            <span>Urlaub: <span className="text-[#c026d3]">{calcAvailableVacation(work).toFixed(1)} Tage</span>
-              {calcAvailableVacation(work) > 0 && (
-                <button onClick={() => { setVacToOTDays(0.5); setShowVacToOT(true); }}
-                  className="ml-1 text-[9px] border border-[#c026d3]/30 text-[#c026d3] rounded px-1 py-0.5 active:scale-95">→⏱</button>
-              )}
-            </span>
+          </div>
+          <div className="bg-surface border border-border rounded-2xl p-3.5 flex flex-col gap-2">
+            <div className="text-[10px] text-inkDim uppercase tracking-wide">Urlaub verfügbar</div>
+            <div className="font-stat text-lg font-bold text-[#c026d3]">
+              {calcAvailableVacation(work).toFixed(1)} <span className="text-xs font-normal">Tage</span>
+            </div>
+            <button onClick={() => { setVacToOTDays(0.5); setShowVacToOT(true); }}
+              disabled={calcAvailableVacation(work) <= 0}
+              className="flex items-center justify-center gap-1.5 border border-[#c026d3]/40 bg-[#c026d3]/10 text-[#c026d3] rounded-xl py-2 disabled:opacity-30 active:scale-95 text-xs font-semibold">
+              <span>⏱</span> → Überstd.
+            </button>
           </div>
         </div>
 
@@ -5366,7 +4345,8 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
               <div className="flex gap-2">
                 <button onClick={() => setShowVacToOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
                 <button onClick={() => { const n = parseFloat(vacToOTDays); if (n > 0) { onConvertVacToOT(n); setShowVacToOT(false); } }}
-                  className="flex-1 bg-[#c026d3]/20 border border-[#c026d3]/50 text-[#c026d3] rounded-xl py-2.5 text-sm font-semibold">
+                  disabled={!(parseFloat(vacToOTDays) > 0) || parseFloat(vacToOTDays) > calcAvailableVacation(work)}
+                  className="flex-1 bg-[#c026d3]/20 border border-[#c026d3]/50 text-[#c026d3] disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold">
                   Umwandeln
                 </button>
               </div>
@@ -5519,20 +4499,15 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onPause, onResume, onClo
             <div className="w-full max-w-md bg-bgElevated border border-border rounded-2xl p-5 space-y-3">
               <div className="font-display font-bold text-gold">Ausstempeln</div>
               <div className="text-sm text-ink space-y-1">
-                <div>Heute gesamt: <span className="font-stat text-heal">{formatHM(totalWorkedToday)}</span>
-                  {workedBefore > 0 && <span className="text-xs text-inkDim ml-1">(inkl. {formatHM(workedBefore)} früher)</span>}
-                </div>
+                <div>Heute bisher: <span className="font-stat text-heal">{formatHM(totalWorkedToday)}</span></div>
                 {requiredMins > 0 && <div>Tagesziel: <span className="font-stat">{formatHM(requiredMins)}</span></div>}
-                {(() => {
-                  const delta = totalWorkedToday - requiredMins;
-                  if (delta > 0) return <div>Überstunden: <span className="font-stat text-heal">+{formatHM(delta)}</span></div>;
-                  if (delta < 0) return <div>Fehlzeit: <span className="font-stat text-hp">{formatHM(delta)}</span></div>;
-                  return <div className="text-heal">Genau pünktlich! ✓</div>;
-                })()}
+              </div>
+              <div className="text-xs text-inkDim leading-relaxed">
+                Wird erst um Mitternacht verbucht — du kannst heute jederzeit wieder einstempeln.
               </div>
               <div className="flex gap-2">
                 <button onClick={() => setShowStopConfirm(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
-                <button onClick={handleStop} className="flex-1 bg-gold text-bg rounded-xl py-2.5 text-sm font-semibold">Bestätigen</button>
+                <button onClick={handleStop} className="flex-1 bg-gold text-bg rounded-xl py-2.5 text-sm font-semibold">Ausstempeln</button>
               </div>
             </div>
           </div>
@@ -5548,15 +4523,30 @@ function WorkAnalysis({ profile, onClose }) {
   const [range, setRange] = useState(7);
 
   const cutoff = range === 0 ? null : addDays(todayBerlin(), -range);
+  const rangeTo = todayBerlin();
   const filtered = log.filter(e => !cutoff || e.date >= cutoff);
 
   const workDays = filtered.filter(e => e.type === 'work');
   const totalWorked = workDays.reduce((s, e) => s + (e.workedMinutes||0), 0);
   const totalRequired = workDays.reduce((s, e) => s + (e.requiredMinutes||0), 0);
   const totalOvertime = workDays.reduce((s, e) => s + (e.overtimeDelta||0), 0);
-  const sickCount = filtered.filter(e => e.type === 'sick').length;
   const absentCount = filtered.filter(e => e.type === 'absent').length;
-  const vacCount = filtered.filter(e => e.type === 'vacation').length;
+
+  // Kranktage/Urlaubstage stehen NICHT im workLog, sondern in eigenen Arrays —
+  // hier korrekt für den gewählten Zeitraum aus den tatsächlichen Einträgen berechnen.
+  function daysInRangeFrom(entries, filterFn) {
+    let total = 0;
+    (entries || []).forEach(entry => {
+      if (filterFn && !filterFn(entry)) return;
+      const from = !cutoff || entry.from > cutoff ? entry.from : cutoff;
+      const to = entry.to < rangeTo ? entry.to : rangeTo;
+      if (from > to) return;
+      total += countWorkDays(from, to, work);
+    });
+    return total;
+  }
+  const sickCount = daysInRangeFrom(work.sickDays);
+  const vacUsedCount = daysInRangeFrom(work.vacationDays, v => v.type !== 'overtime');
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 px-4" onClick={onClose}>
@@ -5582,6 +4572,7 @@ function WorkAnalysis({ profile, onClose }) {
           <div className="flex justify-between text-sm"><span className="text-inkDim">Überstundenkonto gesamt</span><span className={`font-stat ${(work.overtimeMinutes||0)>=0?'text-heal':'text-hp'}`}>{formatHM(work.overtimeMinutes||0)}</span></div>
           <div className="flex justify-between text-sm"><span className="text-inkDim">Urlaub verfügbar</span><span className="font-stat text-gold">{calcAvailableVacation(work).toFixed(1)} Tage</span></div>
           <div className="flex justify-between text-sm"><span className="text-inkDim">Krankheitstage (Zeitraum)</span><span className="font-stat text-ink">{sickCount}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-inkDim">Urlaubstage genommen (Zeitraum)</span><span className="font-stat text-[#c026d3]">{vacUsedCount}</span></div>
           {absentCount > 0 && <div className="flex justify-between text-sm"><span className="text-inkDim">Fehltage ohne Eintrag</span><span className="font-stat text-hp">{absentCount}</span></div>}
         </div>
         {workDays.length > 0 && (
@@ -5589,7 +4580,7 @@ function WorkAnalysis({ profile, onClose }) {
             <div className="text-xs text-inkDim font-semibold">Letzte Einträge</div>
             {workDays.slice(-5).reverse().map((e,i) => (
               <div key={i} className="flex justify-between text-xs text-inkDim">
-                <span>{e.date} {e.clockIn}–{e.clockOut}</span>
+                <span>{e.date} · {formatHM(e.workedMinutes||0)} gearbeitet</span>
                 <span className={e.overtimeDelta >= 0 ? 'text-heal' : 'text-hp'}>{e.overtimeDelta>=0?'+':''}{formatHM(e.overtimeDelta)}</span>
               </div>
             ))}
@@ -5714,16 +4705,14 @@ function TodoSidebar({ profile, open, onToggle, onAdd, onCheck, onDelete }) {
    12. BOTTOM NAVIGATION
    ============================================================ */
 
-function BottomNav({ active, setActive, badges, freizeitEnabled, timerRunning, onTimerOpen }) {
+function BottomNav({ active, setActive, badges, showTimerButton, timerRunning, onTimerOpen }) {
   const b = badges || {};
   const left = [
     { key: 'kalender', label: 'Kalender', icon: '📅', badge: b.kalender },
     { key: 'quests', label: 'Quests', icon: '📜' },
-    { key: 'kampf', label: 'Kampf', icon: '⚔️' },
   ];
   const right = [
-    { key: 'shop', label: 'Shop', icon: '🛒', badge: b.shop },
-    { key: 'inventar', label: 'Inventar', icon: '🎒' },
+    { key: 'kampf', label: 'Kampf', icon: '⚔️' },
     { key: 'mehr', label: 'Mehr', icon: '☰' },
   ];
   const TabBtn = ({ t }) => (
@@ -5740,7 +4729,7 @@ function BottomNav({ active, setActive, badges, freizeitEnabled, timerRunning, o
     <div className="fixed bottom-0 left-0 right-0 z-40 bg-bgElevated border-t border-border safe-bottom">
       <div className="max-w-md mx-auto flex items-end">
         {left.map(t => <TabBtn key={t.key} t={t} />)}
-        {freizeitEnabled && (
+        {showTimerButton && (
           <div className="flex flex-col items-center justify-end pb-1 px-1">
             <button onClick={onTimerOpen}
               className={`w-14 h-14 rounded-full flex flex-col items-center justify-center gap-0 -translate-y-2 border-2 ${
@@ -5748,9 +4737,9 @@ function BottomNav({ active, setActive, badges, freizeitEnabled, timerRunning, o
                   ? 'bg-gold border-gold text-bg shadow-lg shadow-gold/30'
                   : 'bg-bgElevated border-gold/60 text-gold'
               }`}>
-              <span className="text-xl leading-none">⏱</span>
+              <span className="text-xl leading-none">🕐</span>
               <span className="text-[8px] font-medium leading-none mt-0.5">
-                {timerRunning ? 'Läuft' : 'Auszeit'}
+                {timerRunning ? 'Läuft' : 'Arbeit'}
               </span>
             </button>
           </div>
@@ -5955,12 +4944,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(null);
   const [sportModalDate, setSportModalDate] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
-  const [showFreizeitAnalysis, setShowFreizeitAnalysis] = useState(false);
-  const [freizeitScreenOpen, setFreizeitScreenOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [workScreenOpen, setWorkScreenOpen] = useState(false);
   const [showWorkAnalysis, setShowWorkAnalysis] = useState(false);
-  const [showTimerChoice, setShowTimerChoice] = useState(false); // Auswahl Freizeit/Arbeit
   const confirmCallbackRef = useRef(null); // hält den onConfirm-Callback stabil
 
   // _showConfirm global registrieren — DeleteButton ruft das auf
@@ -6006,29 +4992,24 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   // Veraltete Arbeits-Sessions bereinigen: wenn clockedIn=true aber der Sitzungstag
   // nicht heute ist (App wurde geschlossen ohne auszustempeln), Session zurücksetzen.
+  // Sicherheitsnetz für wirklich vergessene Sitzungen (>20h eingestempelt — z.B. Handy
+  // war tagelang zu). Der normale Tageswechsel um Mitternacht wird NICHT hier behandelt,
+  // sondern vom Tagesabschluss-Effekt weiter unten (der bucht korrekt statt zu verwerfen).
   useEffect(() => {
     if (loading) return;
-    const today = todayBerlin();
-    const hasStale = state.profiles.some(p => {
-      if (!p.work?.clockedIn) return false;
-      const wrongDay = p.work?.sessionDate && p.work.sessionDate !== today;
-      const tooOld = p.work?.sessionStart && (Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000;
-      return wrongDay || tooOld;
-    });
+    const hasStale = state.profiles.some(p =>
+      p.work?.clockedIn && p.work?.sessionStart && (Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000
+    );
     if (!hasStale) return;
     update(s => {
       s.profiles.forEach(p => {
-        if (!p.work?.clockedIn) return;
-        const wrongDay = p.work?.sessionDate && p.work.sessionDate !== today;
-        const tooOld = p.work?.sessionStart && (Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000;
-        if (wrongDay || tooOld) {
-          const oldDate = p.work.sessionDate || '?';
+        if (!p.work?.clockedIn || !p.work?.sessionStart) return;
+        if ((Date.now() - p.work.sessionStart) > 20 * 60 * 60 * 1000) {
           p.work.clockedIn = false;
           p.work.sessionStart = null;
-          p.work.pauseStart = null;
-          p.work.pausedMinutesToday = 0;
+          p.work.workedMinutesToday = 0;
           p.work.sessionDate = null;
-          addLog(s, `🕐 ${p.name}: Offene Sitzung vom ${oldDate} automatisch beendet.`);
+          addLog(s, `🕐 ${p.name}: Vergessene Sitzung (>20h) automatisch verworfen.`);
         }
       });
     });
@@ -6043,6 +5024,74 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     }, 60000);
     return () => clearInterval(iv);
   }, []);
+
+  // Urlaubskonto jährlich zurücksetzen: vacationDaysUsed bezieht sich immer auf ein
+  // bestimmtes Jahr (vacationYear). Ändert sich das Jahr, wird der Zähler genullt —
+  // sonst würde die Urlaubsbilanz ab Januar mit dem Vorjahres-Verbrauch verrechnet.
+  useEffect(() => {
+    if (loading) return;
+    const year = todayBerlin().slice(0, 4);
+    const needsReset = state.profiles.some(p => p.work?.enabled && p.work.vacationYear !== year);
+    if (!needsReset) return;
+    update(s => {
+      s.profiles.forEach(p => {
+        if (!p.work?.enabled) return;
+        if (p.work.vacationYear === year) return;
+        const wasSet = !!p.work.vacationYear; // false beim allerersten Lauf (kein Log nötig)
+        p.work.vacationDaysUsed = 0;
+        p.work.vacationYear = year;
+        if (wasSet) addLog(s, `🌴 ${p.name}: Urlaubskonto für ${year} zurückgesetzt.`);
+      });
+    });
+  }, [loading, dayTick]);
+
+  // Tagesabschluss um Mitternacht: seit dem Entfernen des Pause-Buttons wirkt
+  // Ausstempeln nur noch wie eine Pause — die Minuten laufen in workedMinutesToday
+  // auf, werden aber erst hier (sobald der Tag gewechselt hat) final verbucht:
+  // Überstundenkonto + ein workLog-Eintrag für den ABGESCHLOSSENEN Tag.
+  // War man um Mitternacht noch eingestempelt, wird die Sitzung an der Tagesgrenze
+  // "geteilt" — der bisherige Teil wird abgerechnet, eine neue Sitzung beginnt sofort.
+  useEffect(() => {
+    if (loading) return;
+    const today = todayBerlin();
+    const needsFinalize = state.profiles.some(p =>
+      p.work?.enabled && p.work.sessionDate && p.work.sessionDate !== today
+    );
+    if (!needsFinalize) return;
+    update(s => {
+      s.profiles.forEach(p => {
+        if (!p.work?.enabled) return;
+        const w = p.work;
+        if (!w.sessionDate || w.sessionDate === today) return;
+        const finalizedDate = w.sessionDate;
+        let totalMinutes = w.workedMinutesToday || 0;
+        const stillClockedIn = w.clockedIn;
+        if (stillClockedIn) totalMinutes += calcCurrentSessionMinutes(w);
+        totalMinutes = Math.round(totalMinutes);
+
+        const isFree = !isRequiredWorkDayOn(w, finalizedDate);
+        const reqMins = isFree ? 0 : (w.hoursPerDay || 8) * 60;
+        const overtimeDelta = totalMinutes - reqMins;
+        w.overtimeMinutes = (w.overtimeMinutes || 0) + overtimeDelta;
+        if (!w.workLog) w.workLog = [];
+        w.workLog.push({
+          date: finalizedDate, type: 'work',
+          workedMinutes: totalMinutes, requiredMinutes: reqMins, overtimeDelta,
+        });
+        addLog(s, `🕐 ${p.name}: Arbeitstag ${finalizedDate} abgeschlossen — ${formatHM(totalMinutes)} gearbeitet, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
+
+        if (stillClockedIn) {
+          // Nahtlos in den neuen Tag weiterlaufen lassen
+          w.sessionStart = Date.now();
+          w.sessionDate = today;
+          w.workedMinutesToday = 0;
+        } else {
+          w.sessionDate = null;
+          w.workedMinutesToday = 0;
+        }
+      });
+    });
+  }, [loading, dayTick]);
 
   // Fehlzeiten nachtragen: vergangene Soll-Arbeitstage ohne Eintrag werden als Fehlzeit
   // gebucht. Bucht immer nur bis gestern — der laufende Tag bleibt bis Mitternacht offen.
@@ -6088,29 +5137,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       });
     });
   }, [loading, dayTick]);
-
-  // Automatisches Einfrieren eines verpassten Tages, falls noch ein Streak-Freeze vorhanden ist.
-  // Läuft als richtige update()-Mutation (nicht nur in migrateState), damit es korrekt zu
-  // Firebase persistiert wird. Prüft beim Laden einmal alle Profile; ein reines Lese-Pre-Check
-  // verhindert unnötige Schreibvorgänge, wenn ohnehin nichts zu tun ist.
-  useEffect(() => {
-    if (loading) return;
-    const needsCheck = state.profiles.some(p => (p.streakFreezes || 0) > 0 && hasRepairableStreakGap(p));
-    if (!needsCheck) return;
-    update(s => {
-      s.profiles.forEach(p => {
-        if ((p.streakFreezes || 0) > 0 && hasRepairableStreakGap(p)) {
-          const yesterday = addDays(todayBerlin(), -1);
-          if (!p.streakFreezeUsedDates) p.streakFreezeUsedDates = [];
-          if (!p.streakFreezeUsedDates.includes(yesterday)) {
-            p.streakFreezeUsedDates.push(yesterday);
-            p.streakFreezes -= 1;
-            addLog(s, `❄️ ${p.name}: Streak-Freeze automatisch eingesetzt — Streak bleibt erhalten.`);
-          }
-        }
-      });
-    });
-  }, [loading]);
 
   // Beim ersten Laden: bestehende Streaks auf ungezahlte Meilensteine prüfen.
   // Nötig wenn jemand schon vor dem Feature-Update eine lange Streak hatte.
@@ -6209,13 +5235,11 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               clockedIn: prevP.work.clockedIn,
               sessionStart: prevP.work.sessionStart,
               sessionDate: prevP.work.sessionDate,
-              pauseStart: prevP.work.pauseStart,
-              pausedMinutesToday: prevP.work.pausedMinutesToday,
-              penaltyMinutesToday: prevP.work.penaltyMinutesToday,
               overtimeMinutes: prevP.work.overtimeMinutes,
               workLog: prevP.work.workLog,
               vacationDays: prevP.work.vacationDays,
               vacationDaysUsed: prevP.work.vacationDaysUsed,
+              vacationYear: prevP.work.vacationYear,
               sickDays: prevP.work.sickDays,
               workedMinutesToday: prevP.work.workedMinutesToday,
               absenceCheckedUntil: prevP.work.absenceCheckedUntil,
@@ -6425,28 +5449,17 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
-  function handleResetAbilityUpgrades() {
-    update(s => {
-      s.profiles.forEach(p => {
-        // Alle Upgrades löschen
-        p.abilityUpgrades = {};
-        p.streakUpgradePointsEarned = 0;
-        // Punkte neu aus tatsächlicher Streak berechnen
-        const streak = computeStreak(p);
-        let earned = 0;
-        while (streak >= nextStreakUpgradeMilestone(earned)) earned++;
-        p.streakUpgradePointsEarned = earned;
-        p.abilityUpgradePoints = earned; // alle Punkte wieder zur Verteilung frei
-        addLog(s, `🔄 ${p.name}: Ability-Upgrades zurückgesetzt. ${earned} Punkt${earned !== 1 ? 'e' : ''} zur Verteilung (Streak: ${streak} Tage).`);
-      });
-    });
-    pushToast('Ability-Upgrades zurückgesetzt — Punkte neu vergeben.', 'info');
-  }
-
   function handleToggleWork() {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (p) { if (!p.work) p.work = {}; p.work.enabled = !p.work.enabled; }
+      if (p) {
+        if (!p.work) p.work = {};
+        p.work.enabled = !p.work.enabled;
+        // Beim (Wieder-)Aktivieren: Fehlzeiten-Prüfung ab jetzt, nicht rückwirkend über
+        // die Zeit, in der die Erfassung ausgeschaltet war (sonst gäbe es einen Batzen
+        // nachträglicher Fehlzeiten für Tage, an denen gar nicht erfasst wurde).
+        if (p.work.enabled) p.work.absenceCheckedUntil = addDays(todayBerlin(), -1);
+      }
     });
   }
 
@@ -6458,26 +5471,17 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleWorkReset(mode) {
-    if (mode === 'none') { pushToast('Kein Eintrag für heute vorhanden.', 'info'); return; }
-    const today = todayBerlin();
+    if (mode === 'none') { pushToast('Kein Fortschritt für heute vorhanden.', 'info'); return; }
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
-      if (p.work.clockedIn) {
-        p.work.clockedIn = false;
-        p.work.sessionStart = null;
-        p.work.pauseStart = null;
-        p.work.pausedMinutesToday = 0;
-        p.work.sessionDate = null;
-      }
-      const logs = (p.work.workLog || []).filter(e => e.date === today);
-      logs.forEach(e => {
-        p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - (e.overtimeDelta || 0);
-      });
-      p.work.workLog = (p.work.workLog || []).filter(e => e.date !== today);
-      addLog(s, `🔄 ${p.name}: Arbeitstag ${today} zurückgesetzt.`);
+      p.work.clockedIn = false;
+      p.work.sessionStart = null;
+      p.work.workedMinutesToday = 0;
+      p.work.sessionDate = null;
+      addLog(s, `🔄 ${p.name}: Heutiger Arbeitsfortschritt zurückgesetzt.`);
     });
-    pushToast('Arbeitstag zurückgesetzt.', 'info');
+    pushToast('Zurückgesetzt.', 'info');
   }
 
   function handleWorkClockIn() {
@@ -6485,72 +5489,32 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
       const today = todayBerlin();
-      // Bereits heute gebuchte Minuten + Überstunden zurücklesen
-      const todayLogs = (p.work.workLog || []).filter(e => e.date === today);
-      const alreadyWorked = todayLogs.reduce((sum, e) => sum + (e.workedMinutes || 0), 0);
-      const alreadyBooked = todayLogs.reduce((sum, e) => sum + (e.overtimeDelta || 0), 0);
-      // Gebuchtes zurücknehmen — wird beim Ausstempeln als Gesamt-Tageseintrag neu berechnet
-      p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - alreadyBooked;
-      p.work.workLog = (p.work.workLog || []).filter(e => e.date !== today);
+      // Falls der Tag zwischenzeitlich gewechselt hat (Mitternachts-Effekt hat evtl.
+      // noch nicht gefeuert) hier defensiv auf 0 zurücksetzen.
+      if (p.work.sessionDate !== today) {
+        p.work.workedMinutesToday = 0;
+        p.work.sessionDate = today;
+      }
       p.work.clockedIn = true;
       p.work.sessionStart = Date.now();
-      p.work.pauseStart = null;
-      p.work.pausedMinutesToday = 0;
-      p.work.sessionDate = today;
-      p.work.workedMinutesToday = alreadyWorked;
-      addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr)${alreadyWorked > 0 ? ` — bereits ${formatHM(alreadyWorked)} heute geleistet` : ''}.`);
+      addLog(s, `🕐 ${p.name} eingestempelt (${formatTimeHHMM(Date.now())} Uhr)${p.work.workedMinutesToday > 0 ? ` — bereits ${formatHM(p.work.workedMinutesToday)} heute geleistet` : ''}.`);
     }, 'Einstempeln');
   }
 
-  function handleWorkPause() {
+  // Ausstempeln wirkt wie eine Pause: die Sitzung wird beendet und die Minuten
+  // laufen in "workedMinutesToday" auf — gebucht (Überstundenkonto + workLog-Eintrag)
+  // wird erst um Mitternacht durch den Tagesabschluss-Effekt weiter unten.
+  function handleWorkClockOut() {
     updateConfirmed(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (p && p.work && !p.work.pauseStart) p.work.pauseStart = Date.now();
-    }, 'Pause starten');
-  }
-
-  function handleWorkResume() {
-    updateConfirmed(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p || !p.work || !p.work.pauseStart) return;
-      const pausedMins = (Date.now() - p.work.pauseStart) / 60000;
-      p.work.pausedMinutesToday = (p.work.pausedMinutesToday||0) + pausedMins;
-      p.work.pauseStart = null;
-    }, 'Pause beenden');
-  }
-
-  function handleWorkClockOut({ sessionMins, reqMins }) {
-    updateConfirmed(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p || !p.work) return;
-      const clockIn = formatTimeHHMM(p.work.sessionStart);
-      const clockOut = formatTimeHHMM(Date.now());
-      // Gesamt-Tagesleistung = bisherige Sitzungen + aktuelle Sitzung
-      const totalWorked = Math.round(sessionMins + (p.work.workedMinutesToday || 0));
-      const overtimeDelta = totalWorked - Math.round(reqMins);
-      p.work.overtimeMinutes = (p.work.overtimeMinutes||0) + overtimeDelta;
-      if (!p.work.workLog) p.work.workLog = [];
-      p.work.workLog.push({
-        date: p.work.sessionDate || todayBerlin(),
-        type: 'work',
-        clockIn,
-        clockOut,
-        workedMinutes: totalWorked,
-        requiredMinutes: Math.round(reqMins),
-        overtimeDelta,
-      });
+      if (!p || !p.work || !p.work.clockedIn) return;
+      const mins = calcCurrentSessionMinutes(p.work);
+      p.work.workedMinutesToday = (p.work.workedMinutesToday || 0) + mins;
       p.work.clockedIn = false;
       p.work.sessionStart = null;
-      p.work.pauseStart = null;
-      p.work.pausedMinutesToday = 0;
-      p.work.sessionDate = null;
-      p.work.workedMinutesToday = 0;
-      addLog(s, `🕐 ${p.name} ausgestempelt — ${formatHM(totalWorked)} heute gesamt, ${overtimeDelta>=0?'+':''}${formatHM(overtimeDelta)} Überstunden.`);
+      addLog(s, `🕐 ${p.name} ausgestempelt — bisher heute ${formatHM(p.work.workedMinutesToday)} (wird um Mitternacht verbucht).`);
     }, 'Ausstempeln').then(ok => {
-      if (ok) {
-        setWorkScreenOpen(false);
-        setFreizeitScreenOpen(false);
-      }
+      if (ok) setWorkScreenOpen(false);
     });
   }
 
@@ -6631,6 +5595,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleBuyOvertime(amount = 1) {
+    if (!(amount > 0) || (activeProfile.gold || 0) < amount) {
+      pushToast('⚠️ Nicht genug Gold.', 'error');
+      return;
+    }
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work || (p.gold || 0) < amount) return;
@@ -6642,11 +5610,14 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   }
 
   function handleConvertVacToOT(days) {
+    const avail = calcAvailableVacation(activeProfile.work || {});
+    if (!(days > 0) || days > avail) {
+      pushToast('⚠️ Nicht genug Urlaubstage verfügbar.', 'error');
+      return;
+    }
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
       if (!p || !p.work) return;
-      const avail = calcAvailableVacation(p.work);
-      if (days > avail) return;
       const mins = Math.round(days * (p.work.hoursPerDay || 8) * 60);
       p.work.vacationDaysUsed = (p.work.vacationDaysUsed || 0) + days;
       p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) + mins;
@@ -6690,56 +5661,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     });
   }
 
-  function handleToggleFreizeit() {
-    update(s => {
-      const p = s.profiles.find(p => p.id === activeProfile.id);
-      if (p) p.freizeitEnabled = !p.freizeitEnabled;
-    });
-  }
-
-  // Freizeit-Timer starten/stoppen
-  function handleStartFreizeit() {
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p) return;
-      if (!p.freizeitTimer) p.freizeitTimer = { running: false, startedAt: null, pendingMinutes: 0, log: [], customCategories: [] };
-      p.freizeitTimer.running = true;
-      p.freizeitTimer.startedAt = Date.now();
-    });
-  }
-
-  function handleStopFreizeit(entries, customCats, forgiven) {
-    const freizeit = activeProfile.freizeitTimer || {};
-    const sessionMs = freizeit.startedAt ? Date.now() - freizeit.startedAt : 0;
-    const sessionMinutes = sessionMs / 60000;
-    const forgivenMinutes = forgiven ? Math.min(sessionMinutes, Math.max(0, forgiven.minutes || 0)) : 0;
-    const effectiveSessionMinutes = Math.max(0, sessionMinutes - forgivenMinutes);
-    const totalMinutes = (freizeit.pendingMinutes || 0) + effectiveSessionMinutes;
-    const hoursToDeduct = Math.floor(totalMinutes / 60);
-    const newPending = totalMinutes % 60;
-
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p) return;
-      if (!p.freizeitTimer) p.freizeitTimer = { running: false, startedAt: null, pendingMinutes: 0, log: [], customCategories: [] };
-      p.freizeitTimer.running = false;
-      p.freizeitTimer.startedAt = null;
-      p.freizeitTimer.pendingMinutes = newPending;
-      if (customCats) p.freizeitTimer.customCategories = customCats;
-      if ((entries && entries.length > 0) || forgivenMinutes > 0) {
-        if (!p.freizeitTimer.log) p.freizeitTimer.log = [];
-        p.freizeitTimer.log.push({
-          date: todayBerlin(),
-          totalMinutes: Math.round(effectiveSessionMinutes),
-          entries: entries || [],
-          forgiven: forgivenMinutes > 0 ? { minutes: Math.round(forgivenMinutes), reason: forgiven.reason } : null,
-        });
-      }
-      if (hoursToDeduct > 0) p.gold = Math.max(0, (p.gold || 0) - hoursToDeduct);
-    });
-    if (hoursToDeduct > 0) pushToast(`${hoursToDeduct} G für Auszeit abgebucht.`, 'info');
-    else if (forgivenMinutes > 0) pushToast(`${Math.round(forgivenMinutes)} Min nicht gezählt.`, 'info');
-  }
 
 
   function handleAddBirthday(data) {
@@ -6887,37 +5808,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     pushToast('Gelöscht.', 'info');
   }
 
-  function handleAddShopItem(category, item) {
-    update(s => { s.shop[category].push({ id: uid('shop'), title: item.title, cost: item.cost, icon: item.icon, custom: true }); });
-  }
-
-  function handleDeleteShopItems(keys) {
-    update(s => {
-      keys.forEach(key => {
-        const sep = key.indexOf(':');
-        const category = key.slice(0, sep);
-        const id = key.slice(sep + 1);
-        if (s.shop[category]) s.shop[category] = s.shop[category].filter(item => item.id !== id);
-      });
-    });
-    pushToast(keys.length > 1 ? `${keys.length} Items gelöscht.` : 'Item gelöscht.', 'info');
-  }
-
-  function handleEditShopItems(items) {
-    update(s => {
-      // IDs von Default-Shop-Items die entfernt wurden → Blockliste
-      const allDefaults = new Set([...SHOP_GEMEINSAM, ...SHOP_GESCHENK].map(i => i.id));
-      const newIds = new Set([...items.gemeinsam, ...items.geschenk].map(i => i.id));
-      if (!Array.isArray(s.deletedDefaultShopIds)) s.deletedDefaultShopIds = [];
-      const deletedSet = new Set(s.deletedDefaultShopIds);
-      allDefaults.forEach(id => { if (!newIds.has(id)) deletedSet.add(id); });
-      s.deletedDefaultShopIds = [...deletedSet];
-      s.shop.gemeinsam = items.gemeinsam;
-      s.shop.geschenk = items.geschenk;
-    });
-    pushToast('Shop gespeichert.', 'info');
-  }
-
   function handleUpgradeAbility(abilityId) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
@@ -6928,140 +5818,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       addLog(s, `⬆️ ${p.name} hat ${abilityId} aufgewertet (+2 Bonus).`);
     });
     pushToast('+2 Ability-Bonus angelegt!', 'info');
-  }
-
-  function handleBuyStreakFreeze() {
-    if ((activeProfile.streakFreezes || 0) >= STREAK_FREEZE_CAP) return;
-    if ((activeProfile.gold || 0) < STREAK_FREEZE_COST) return;
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p) return;
-      p.gold -= STREAK_FREEZE_COST;
-      p.streakFreezes = (p.streakFreezes || 0) + 1;
-      addLog(s, `❄️ ${p.name} hat einen Streak-Freeze gekauft (${p.streakFreezes}/${STREAK_FREEZE_CAP}).`);
-    });
-    pushToast('Streak-Freeze gekauft.', 'info');
-  }
-
-  function handleRepairStreak() {
-    const info = streakRestoreInfo(activeProfile);
-    if (info.missing <= 0) return;
-    if ((activeProfile.gold || 0) < STREAK_REPAIR_COST) return;
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p) return;
-      const inner = streakRestoreInfo(p);
-      if (inner.missing <= 0) return;
-      p.gold -= STREAK_REPAIR_COST;
-      if (!p.streakFreezeUsedDates) p.streakFreezeUsedDates = [];
-      // Fehlende Tage direkt vor der aktuellen Kette als geschützt markieren
-      let d = addDays(currentStreakStartDate(p), inner.current > 0 ? -1 : 0);
-      for (let i = 0; i < inner.missing; i++) {
-        if (!p.streakFreezeUsedDates.includes(d)) p.streakFreezeUsedDates.push(d);
-        d = addDays(d, -1);
-      }
-      addLog(s, `🔧 ${p.name} hat die Streak gerettet — zurück auf ${inner.best} Tage (+${inner.missing}).`);
-    });
-    pushToast(`Streak gerettet! 🔥 ${info.best} Tage`, 'info');
-  }
-
-  function handleBuyDoubleXp() {
-    const today = todayBerlin();
-    if (activeProfile.doubleXpDate === today) return; // schon aktiv
-    if ((activeProfile.gold || 0) < DOUBLE_XP_COST) return;
-    update(s => {
-      const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (!p) return;
-      p.gold -= DOUBLE_XP_COST;
-      p.doubleXpDate = today;
-      addLog(s, `⚡ ${p.name} hat 2x XP für heute aktiviert.`);
-    });
-    pushToast('2x XP aktiv bis Mitternacht!', 'info');
-  }
-
-  function handleBuy(item, category, buyerPaid) {
-    // Solo: kein Partner → sofort kaufen, kein Bestätigungs-Workflow nötig
-    if (!partnerProfile) {
-      update(s => {
-        const p = s.profiles.find(pr => pr.id === activeProfile.id);
-        if (!p || p.gold < item.cost) return;
-        p.gold -= item.cost;
-        addLog(s, `🛒 ${p.name} kauft "${item.title}" für ${item.cost} G.`);
-      });
-      pushToast(`"${item.title}" gekauft!`, 'info');
-      return;
-    }
-    if (!partnerProfile) return;
-    const partnerPaid = category === 'gemeinsam' ? item.cost - buyerPaid : 0;
-    update(s => {
-      const buyer = s.profiles.find(p => p.id === activeProfile.id);
-      const partner = s.profiles.find(p => p.id === partnerProfile.id);
-      buyer.gold -= buyerPaid;
-      if (category === 'gemeinsam') partner.gold -= partnerPaid;
-      s.pendingConfirmations.push({
-        id: uid('confirm'), category, itemId: item.id, title: item.title, icon: item.icon, cost: item.cost,
-        buyerId: buyer.id, partnerId: partner.id, buyerPaid, partnerPaid,
-      });
-      addLog(s, `🛒 ${buyer.name} möchte "${item.title}" kaufen — Bestätigung von ${partner.name} ausstehend.`);
-    });
-    pushToast('Kaufanfrage gesendet — Bestätigung steht aus.', 'info');
-  }
-
-  function handleConfirm(confirmId) {
-    update(s => {
-      const c = s.pendingConfirmations.find(x => x.id === confirmId);
-      if (!c) return;
-      const item = { id: uid('inv'), title: c.title, icon: c.icon, done: false };
-      if (c.category === 'geschenk') {
-        const partner = s.profiles.find(p => p.id === c.partnerId);
-        partner.inventory.push(item);
-      } else {
-        s.sharedInventory.push(item);
-      }
-      s.pendingConfirmations = s.pendingConfirmations.filter(x => x.id !== confirmId);
-      addLog(s, `✅ Kauf "${c.title}" bestätigt.`);
-    });
-    pushToast('Bestätigt!', 'info');
-  }
-
-  function handleDecline(confirmId) {
-    update(s => {
-      const c = s.pendingConfirmations.find(x => x.id === confirmId);
-      if (!c) return;
-      const buyer = s.profiles.find(p => p.id === c.buyerId);
-      const partner = s.profiles.find(p => p.id === c.partnerId);
-      buyer.gold += c.buyerPaid;
-      if (c.category === 'gemeinsam') partner.gold += c.partnerPaid;
-      s.pendingConfirmations = s.pendingConfirmations.filter(x => x.id !== confirmId);
-      addLog(s, `❌ Kauf "${c.title}" abgelehnt — Gold wurde zurückerstattet.`);
-    });
-    pushToast('Abgelehnt — Gold zurückerstattet.', 'info');
-  }
-
-  function handleMarkInventoryDone(scope, itemId) {
-    update(s => {
-      if (scope === 'personal') {
-        const p = s.profiles.find(pr => pr.id === activeProfile.id);
-        const item = p.inventory.find(i => i.id === itemId);
-        if (item) item.done = !item.done;
-      } else {
-        const item = s.sharedInventory.find(i => i.id === itemId);
-        if (item) item.done = !item.done;
-      }
-    });
-  }
-
-  function handleSetItemDate(scope, itemId, date) {
-    update(s => {
-      if (scope === 'personal') {
-        const p = s.profiles.find(pr => pr.id === activeProfile.id);
-        const item = p.inventory.find(i => i.id === itemId);
-        if (item) item.plannedDate = date || null;
-      } else {
-        const item = s.sharedInventory.find(i => i.id === itemId);
-        if (item) item.plannedDate = date || null;
-      }
-    });
   }
 
   function handleExport() {
@@ -7088,7 +5844,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     reader.readAsText(file);
   }
 
-  const myConfirmCount = state.pendingConfirmations.filter(c => c.partnerId === activeProfile.id).length;
   const todayAgendaForBadge = getTodayAgenda(state, todayBerlin(), activeProfile.id);
   const calendarAgendaCount = todayAgendaForBadge.filter(e => !e.done && e.item.kind === 'aufgabe').length;
   const today = todayBerlin();
@@ -7108,15 +5863,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     getDayAgenda(state, calendarViewedDate, todayBerlin(), activeProfile.id)
   );
   const upcomingAgendaForCalendarTab = getUpcomingAgenda(state, todayBerlin(), 30, activeProfile.id);
-  const plannedItemDates = new Set([
-    ...(activeProfile.inventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
-    ...(state.sharedInventory || []).filter(i => i.plannedDate && !i.done).map(i => i.plannedDate),
-  ]);
-
-  const plannedItemsForDay = [
-    ...(activeProfile.inventory || []).filter(i => i.plannedDate === calendarViewedDate && !i.done),
-    ...(state.sharedInventory || []).filter(i => i.plannedDate === calendarViewedDate && !i.done),
-  ];
 
   const [cvYear, cvMonth, cvDay] = calendarViewedDate.split('-').map(Number);
   const birthdaysForDay = (state.birthdays || []).filter(b =>
@@ -7201,24 +5947,12 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         </div>
       )}
 
-      {/* Freizeit-Timer Vollbild */}
-      {activeProfile.freizeitEnabled && (freizeitScreenOpen || activeProfile.freizeitTimer?.running) && (
-        <FreizeitTimerScreen
-          profile={activeProfile}
-          onStart={() => { handleStartFreizeit(); }}
-          onStop={(entries, customCats, forgiven) => { handleStopFreizeit(entries, customCats, forgiven); setFreizeitScreenOpen(false); }}
-          onClose={() => setFreizeitScreenOpen(false)}
-        />
-      )}
-
       {/* Arbeitszeiterfassung Vollbild */}
       {(activeProfile.work||{}).enabled && workScreenOpen && (
         <WorkTimerScreen
           profile={activeProfile}
           onClose={() => setWorkScreenOpen(false)}
           onClockIn={handleWorkClockIn}
-          onPause={handleWorkPause}
-          onResume={handleWorkResume}
           onClockOut={handleWorkClockOut}
           onAddSickDay={handleAddSickDay}
           onDeleteSickDay={handleDeleteSickDay}
@@ -7228,27 +5962,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onConvertVacToOT={handleConvertVacToOT}
           onReset={handleWorkReset}
         />
-      )}
-
-      {/* Timer-Auswahl (Freizeit vs. Arbeit) */}
-      {showTimerChoice && (
-        <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/60 px-4 pb-10"
-          onClick={() => setShowTimerChoice(false)}>
-          <div className="w-full max-w-md space-y-2" onClick={e => e.stopPropagation()}>
-            <button onClick={() => { setShowTimerChoice(false); setWorkScreenOpen(true); }}
-              className="w-full bg-bgElevated border border-border rounded-2xl py-4 text-base font-semibold text-ink active:scale-[0.98]">
-              🕐 Arbeitszeit erfassen
-            </button>
-            <button onClick={() => { setShowTimerChoice(false); setFreizeitScreenOpen(true); }}
-              className="w-full bg-bgElevated border border-border rounded-2xl py-4 text-base font-semibold text-ink active:scale-[0.98]">
-              ⏱ Auszeit starten
-            </button>
-            <button onClick={() => setShowTimerChoice(false)}
-              className="w-full border border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.98]">
-              Abbrechen
-            </button>
-          </div>
-        </div>
       )}
 
       {/* Arbeitszeit-Analyse */}
@@ -7316,16 +6029,10 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       {activeTab === 'kampf' && (
         <CombatTab state={state} profiles={state.profiles} activeProfileId={activeProfile.id} onUseAbility={handleUseAbility} onUpgradeAbility={handleUpgradeAbility} />
       )}
-      {activeTab === 'shop' && (
-        <ShopTab state={state} profile={activeProfile} partner={partnerProfile}
-          onBuy={handleBuy} onAddShopItem={handleAddShopItem} onEditShopItems={handleEditShopItems}
-          onConfirm={handleConfirm} onDecline={handleDecline}
-          onBuyStreakFreeze={handleBuyStreakFreeze} onRepairStreak={handleRepairStreak} onBuyDoubleXp={handleBuyDoubleXp} />
-      )}
       {activeTab === 'kalender' && (
         <div className="px-4 pt-4 pb-28 space-y-4">
           <CalendarGrid profile={activeProfile} quests={state.quests} calendarItems={state.calendarItems}
-            plannedItemDates={plannedItemDates} birthdays={state.birthdays || []}
+            birthdays={state.birthdays || []}
             selectedDate={calendarSelectedDate} onSelectDate={setCalendarSelectedDate} />
           <button onClick={() => setCalendarModal({ mode: 'add', date: calendarViewedDate })}
             className="w-full border border-dashed border-border rounded-2xl py-3 text-sm text-inkDim active:scale-[0.99]">
@@ -7371,7 +6078,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
               </div>
             )}
 
-            {dayAgendaForCalendarTab.length === 0 && plannedItemsForDay.length === 0 && birthdaysForDay.length === 0 && questDeadlinesForDay.filter(({ quest, deadline }) => { const dp = (activeProfile.questProgress || {})[calendarViewedDate] || {}; return dp[quest.id] !== 'komplett'; }).length === 0 ? (
+            {dayAgendaForCalendarTab.length === 0 && birthdaysForDay.length === 0 && questDeadlinesForDay.filter(({ quest, deadline }) => { const dp = (activeProfile.questProgress || {})[calendarViewedDate] || {}; return dp[quest.id] !== 'komplett'; }).length === 0 ? (
               <div className="text-xs text-inkDim">
                 {calendarViewedDate === todayBerlin() ? 'Keine Aufgaben oder Termine heute.' : 'Keine Aufgaben oder Termine an diesem Tag.'}
               </div>
@@ -7408,18 +6115,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
                     onComplete={handleCalendarComplete} onUncomplete={handleCalendarUncomplete} onEdit={(item) => setCalendarModal({ mode: 'edit', item })}
                     actionable={calendarViewedDate <= todayBerlin()} showDate={false} />
                 ))}
-                {plannedItemsForDay.map(item => (
-                  <div key={item.id} className="flex items-center gap-2.5 rounded-xl border border-gold/50 bg-gold/5 px-3 py-2.5">
-                    <span className="text-lg shrink-0">{item.icon || '🎁'}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-ink truncate">{item.title}</div>
-                      <div className="text-[10px] text-gold">Geplantes Item</div>
-                    </div>
-                    {item.cost != null && (
-                      <span className="text-xs font-stat text-gold shrink-0">{item.cost} 🪙</span>
-                    )}
-                  </div>
-                ))}
                 {birthdaysForDay.map(b => {
                   const age = b.year ? cvYear - b.year : null;
                   return (
@@ -7449,7 +6144,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-heal"></span>Quest erledigt</span>
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange"></span>Aufgabe geplant</span>
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-shield"></span>Termin geplant</span>
-            <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-gold"></span>Item geplant</span>
             {activeProfile.sportTrackingEnabled && (
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-sport"></span>Sport getrackt</span>
             )}
@@ -7481,12 +6175,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onClose={() => setSportModalDate(null)}
         />
       )}
-      {activeTab === 'inventar' && (
-        <div className="px-4 pt-4 pb-28">
-          <InventoryList profile={activeProfile} sharedInventory={state.sharedInventory} onMarkDone={handleMarkInventoryDone} onSetDate={handleSetItemDate} />
-          <InventoryLogList profile={activeProfile} partner={partnerProfile} sharedInventory={state.sharedInventory} onUnmarkDone={handleMarkInventoryDone} />
-        </div>
-      )}
       {activeTab === 'mehr' && (
         <MoreTab
           state={state} profile={activeProfile}
@@ -7496,34 +6184,19 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onExport={handleExport} onImport={handleImport}
           onUnpair={onUnpair}
           onToggleSportTracking={handleToggleSportTracking}
-          onToggleFreizeit={handleToggleFreizeit}
-          onShowFreizeitAnalysis={() => setShowFreizeitAnalysis(true)}
           onToggleWork={handleToggleWork}
           onUpdateWorkSettings={handleUpdateWorkSettings}
           onShowWorkAnalysis={() => setShowWorkAnalysis(true)}
           onAddBirthday={handleAddBirthday}
           onDeleteBirthday={handleDeleteBirthday}
-          onResetAbilityUpgrades={handleResetAbilityUpgrades}
         />
       )}
 
       <BottomNav active={activeTab} setActive={setActiveTab}
-        badges={{ shop: myConfirmCount, kalender: calendarBadgeCount }}
-        freizeitEnabled={activeProfile.freizeitEnabled || (activeProfile.work||{}).enabled}
-        timerRunning={!!activeProfile.freizeitTimer?.running || !!(activeProfile.work||{}).clockedIn}
-        onTimerOpen={() => {
-          const hasFreizeit = activeProfile.freizeitEnabled;
-          const hasWork = (activeProfile.work||{}).enabled;
-          const workRunning = !!(activeProfile.work||{}).clockedIn;
-          const freizeitRunning = !!activeProfile.freizeitTimer?.running;
-          // Läuft bereits einer? → direkt zu dem
-          if (workRunning) { setWorkScreenOpen(true); return; }
-          if (freizeitRunning) { setFreizeitScreenOpen(true); return; }
-          // Keiner läuft → Auswahl oder direkt
-          if (hasFreizeit && hasWork) { setShowTimerChoice(true); }
-          else if (hasWork) { setWorkScreenOpen(true); }
-          else { setFreizeitScreenOpen(true); }
-        }} />
+        badges={{ kalender: calendarBadgeCount }}
+        showTimerButton={(activeProfile.work||{}).enabled}
+        timerRunning={!!(activeProfile.work||{}).clockedIn}
+        onTimerOpen={() => setWorkScreenOpen(true)} />
 
       {editingProfile && !editingProfile.isNew && (
         <ProfileEditor
@@ -7540,12 +6213,6 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
         />
       )}
     </div>
-    {showFreizeitAnalysis && (
-      <FreizeitAnalysis
-        log={activeProfile.freizeitTimer?.log || []}
-        onClose={() => setShowFreizeitAnalysis(false)}
-      />
-    )}
     {confirmDialog && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 px-4"
         onPointerDown={() => setConfirmDialog(null)}>
