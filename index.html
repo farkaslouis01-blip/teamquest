@@ -149,20 +149,6 @@
   }
   .toast-in { animation: toastIn 0.25s ease-out; }
 
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    20% { transform: translateX(-6px); }
-    40% { transform: translateX(6px); }
-    60% { transform: translateX(-4px); }
-    80% { transform: translateX(4px); }
-  }
-  .shake { animation: shake 0.4s ease-in-out; }
-
-  .rune-divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, #473d57, transparent);
-  }
-
   input, select, textarea { font-family: 'Inter', sans-serif; }
   input:focus, select:focus, textarea:focus, button:focus-visible {
     outline: 2px solid #d4a843;
@@ -276,39 +262,28 @@ function nextStreakUpgradeMilestone(pointsEarned) {
   return streakMilestoneN((pointsEarned || 0) + 1);
 }
 
-const DEFAULT_QUEST_CATEGORIES = [
-  'Haushalt', 'Sport & Bewegung', 'Zeichnen', 'Uni', 'Verwaltung & Kommunikation', 'Struktur & Vorbereitung'
-];
+const DEFAULT_QUEST_CATEGORIES = ['Körperpflege', 'Haushalt', 'Sport'];
 
+// Quests haben keinen eigenen XP-Wert mehr — XP wird zur Laufzeit anhand der
+// Kategorie berechnet (siehe REGULAR_QUEST_XP / sportQuestXp).
 const DEFAULT_QUESTS = [
+  // Körperpflege
+  { id: 'kp1', title: 'Zähne putzen', icon: '🦷', category: 'Körperpflege', custom: false },
+  { id: 'kp2', title: 'Duschen', icon: '🚿', category: 'Körperpflege', custom: false },
+  { id: 'kp3', title: 'Rasieren', icon: '🪒', category: 'Körperpflege', custom: false },
+  { id: 'kp4', title: 'Supplements nehmen', icon: '💊', category: 'Körperpflege', custom: false },
   // Haushalt
-  { id: 'q1', title: 'Waschen / Körperpflege', xp: 10, icon: '🧼', category: 'Haushalt', custom: false },
-  { id: 'q2', title: '5-Minuten-Aufräumen', xp: 10, icon: '🧹', category: 'Haushalt', custom: false },
-  { id: 'q3', title: 'Spülen / Küche', xp: 10, icon: '🍽️', category: 'Haushalt', custom: false },
-  { id: 'q4', title: 'Wäsche wegräumen', xp: 10, icon: '👕', category: 'Haushalt', custom: false },
-  // Sport & Bewegung (eigenes ID-Präfix — die alte ID "q5" gehörte früher "Bonus-Aufgabe")
-  { id: 'sport1', title: 'Spazieren gehen', xp: 10, icon: '🚶', category: 'Sport & Bewegung', custom: false },
-  { id: 'sport2', title: 'Sport machen', xp: 10, icon: '🏃', category: 'Sport & Bewegung', custom: false },
-  { id: 'sport3', title: 'Ins Gym gehen', xp: 20, icon: '🏋️', category: 'Sport & Bewegung', custom: false },
-  // Zeichnen
-  { id: 'art1', title: 'Skizze starten', xp: 10, icon: '🎨', category: 'Zeichnen', custom: false },
-  { id: 'art2', title: 'Lineart fertigstellen', xp: 10, icon: '✏️', category: 'Zeichnen', custom: false },
-  { id: 'art3', title: 'Zeichnung kolorieren', xp: 10, icon: '🖌️', category: 'Zeichnen', custom: false },
-  { id: 'art4', title: 'Referenzen sammeln', xp: 10, icon: '📁', category: 'Zeichnen', custom: false },
-  { id: 'art5', title: 'Angefangenes Bild weiterführen', xp: 10, icon: '🖼️', category: 'Zeichnen', custom: false },
-  // Uni
-  { id: 'uni1', title: 'Kapitel/Skript lesen oder zusammenfassen', xp: 10, icon: '📖', category: 'Uni', custom: false },
-  { id: 'uni2', title: 'Vorlesungsmitschrift nacharbeiten', xp: 10, icon: '📝', category: 'Uni', custom: false },
-  { id: 'uni3', title: 'Lernen', xp: 10, icon: '📚', category: 'Uni', custom: false },
-  { id: 'uni4', title: 'Prüfungs-/Abgabetermin eintragen', xp: 10, icon: '🗓️', category: 'Uni', custom: false },
-  { id: 'uni5', title: 'Hausarbeit/Referat einen Schritt weiterbringen', xp: 20, icon: '🎓', category: 'Uni', custom: false },
-  // Verwaltung & Kommunikation
-  { id: 'admin1', title: 'Posteingang/Post sortieren', xp: 10, icon: '📧', category: 'Verwaltung & Kommunikation', custom: false },
-  { id: 'admin2', title: 'Formular/Antrag einen Schritt weiterbringen', xp: 20, icon: '📝', category: 'Verwaltung & Kommunikation', custom: false },
-  { id: 'admin3', title: 'Aufgeschobene Nachricht oder Anruf erledigen', xp: 20, icon: '📞', category: 'Verwaltung & Kommunikation', custom: false },
-  // Struktur & Vorbereitung
-  { id: 'struct1', title: 'Sachen für morgen vorbereiten', xp: 10, icon: '🎒', category: 'Struktur & Vorbereitung', custom: false },
-  { id: 'struct2', title: 'Arbeitsplatz 5 Minuten aufräumen', xp: 10, icon: '🧹', category: 'Struktur & Vorbereitung', custom: false },
+  { id: 'hh1', title: 'Geschirrspüler ausräumen', icon: '🍽️', category: 'Haushalt', custom: false },
+  { id: 'hh2', title: 'Wäsche waschen', icon: '🧺', category: 'Haushalt', custom: false },
+  { id: 'hh3', title: 'Müll rausbringen', icon: '🗑️', category: 'Haushalt', custom: false },
+  { id: 'hh4', title: 'Staubsaugen', icon: '🧹', category: 'Haushalt', custom: false },
+  { id: 'hh5', title: 'Zimmer aufräumen', icon: '🧽', category: 'Haushalt', custom: false },
+  { id: 'hh6', title: 'Badezimmer putzen', icon: '🚽', category: 'Haushalt', custom: false },
+  { id: 'hh7', title: 'Spülen', icon: '🧼', category: 'Haushalt', custom: false },
+  { id: 'hh8', title: 'Kühlschrank aufräumen', icon: '🧊', category: 'Haushalt', custom: false },
+  // Sport — besonderer Ablauf: beim Erledigen wird nach Minuten gefragt (siehe SportMinutesModal)
+  { id: 'sp1', title: 'Cardio', icon: '🏃', category: 'Sport', custom: false },
+  { id: 'sp2', title: 'Krafttraining', icon: '🏋️', category: 'Sport', custom: false },
 ];
 
 const METHODS = [
@@ -329,13 +304,33 @@ function topUnlockedMethod(profile) {
   return unlocked.length ? unlocked[unlocked.length - 1] : null;
 }
 
-const MAX_ACTIONS_PER_DAY = 3;
 const CALENDAR_XP_PER_TASK = 5;
 const CALENDAR_XP_DAILY_CAP = 10;
 const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-const QUEST_XP_DAILY_BASE_CAP = 50;
-const QUEST_XP_CAP_BONUS_PER_HARD_QUEST = 5;
-const QUEST_HARD_XP_THRESHOLD = 20; // Quests mit diesem XP-Wert zählen als "schwer" und erhöhen den Tagesdeckel
+
+// Quest-XP: pauschal für alle normalen Quests, formelbasiert für Sport — kein Tagesdeckel mehr.
+const SPORT_CATEGORY = 'Sport';
+const REGULAR_QUEST_XP = 10;
+function sportQuestXp(minutes) {
+  const m = Math.max(0, Math.floor(minutes || 0));
+  return 3 + 3 * Math.floor(m / 5);
+}
+
+// Kampf-Aktionen: kein festes Tageslimit mehr — stattdessen Fibonacci-Schwellen auf
+// Basis der heute erledigten Quests (kumulativ): 1, 2, 4, 7, 12, 20, 33, 54, 88, ...
+// FIB_ACTION_THRESHOLDS[i] = wie viele Quests insgesamt nötig sind für die (i+1)-te Aktion.
+const FIB_ACTION_THRESHOLDS = (() => {
+  const arr = [];
+  let a = 1, b = 1, sum = 0;
+  for (let i = 0; i < 25; i++) { sum += a; arr.push(sum); [a, b] = [b, a + b]; }
+  return arr;
+})();
+function actionsEarnedForQuestCount(count) {
+  return FIB_ACTION_THRESHOLDS.filter(t => t <= count).length;
+}
+function nextActionThreshold(count) {
+  return FIB_ACTION_THRESHOLDS.find(t => t > count) ?? (FIB_ACTION_THRESHOLDS[FIB_ACTION_THRESHOLDS.length - 1] + 1);
+}
 
 /* ============================================================
    2. HILFSFUNKTIONEN
@@ -509,14 +504,12 @@ function freshProfile(overrides) {
     level: 1,
     xp: 0,
     gold: 0,
-    questProgress: {},   // { 'YYYY-MM-DD': { questId: 'kurz' | 'komplett' } }
-    actionsToday: { date: null, count: 0 },   // verdiente Kampf-Aktionen heute (durch Quests)
-    actionsSpent: { date: null, count: 0 },   // davon bereits für Fähigkeiten eingesetzte Aktionen
-    actionsGrantedFor: {},                     // { 'YYYY-MM-DD': { questId: true } } — verhindert doppelte Aktionen durch kurz->komplett
-    xpGrantedFor: {},                          // { 'YYYY-MM-DD': { questId: <tatsächlich vergebene XP heute> } } — für exaktes Rückgängigmachen
+    questProgress: {},   // { 'YYYY-MM-DD': { questId: 'komplett' } } — Kampf-Aktionen werden live aus der Anzahl abgeleitet (Fibonacci)
+    actionsSpent: { date: null, count: 0 },   // heute bereits für Fähigkeiten eingesetzte Aktionen
+    xpGrantedFor: {},                          // { 'YYYY-MM-DD': { questId: <tatsächlich vergebene XP> } } — für exaktes Rückgängigmachen
     cooldowns: {},        // { abilityId: 'YYYY-MM-DD' (zuletzt benutzt) }
     calendarXpToday: { date: null, amount: 0 }, // XP-Deckel für Kalender-Aufgaben (max 10/Tag)
-    questXpToday: { date: null, amount: 0 },    // XP-Deckel für Quests (Basis 50/Tag, +10 pro Level über 1, +5 pro schwere Quest)
+    sportQuestLog: {},    // { 'YYYY-MM-DD': [{ questId, title, minutes, xp, ts }] } — für die Sport-Analyse
     sportTrackingEnabled: false,
     sportLog: {},
     questDeadlines: {},
@@ -588,6 +581,16 @@ function migrateState(loaded) {
   const base = initialState();
   const merged = Object.assign({}, base, loaded);
 
+  // EINMALIGE Migration: komplette Quest-Neugestaltung (Körperpflege/Haushalt/Sport,
+  // kein "Nur kurz" mehr, kein XP-Wert mehr pro Quest). Ersetzt ALLE bisherigen Quests
+  // und Kategorien unwiderruflich — erkennbar an questsResetV2, läuft nur einmal pro Stand.
+  if (!merged.questsResetV2) {
+    merged.quests = DEFAULT_QUESTS.slice().map(q => Object.assign({}, q));
+    merged.questCategories = DEFAULT_QUEST_CATEGORIES.slice();
+    merged.deletedDefaultQuestIds = [];
+    merged.questsResetV2 = true;
+  }
+
   // Kategorien-Liste nachrüsten, falls aus einer Vor-Kategorien-Version geladen.
   if (!Array.isArray(merged.questCategories) || merged.questCategories.length === 0) {
     merged.questCategories = DEFAULT_QUEST_CATEGORIES.slice();
@@ -599,9 +602,6 @@ function migrateState(loaded) {
     const match = DEFAULT_QUESTS.find(dq => dq.id === q.id);
     return Object.assign({}, q, { category: match ? match.category : 'Sonstiges' });
   });
-
-  // "Bonus-Aufgabe" wurde bewusst entfernt — falls noch aus einem alten Stand vorhanden, raus damit.
-  quests = quests.filter(q => q.title !== 'Bonus-Aufgabe');
 
   // Neue Standard-Quests ergänzen — aber nur, wenn sie nicht vom Nutzer bewusst gelöscht wurden.
   // Gelöschte Default-Quest-IDs werden in deletedDefaultQuestIds gespeichert.
@@ -625,12 +625,15 @@ function migrateState(loaded) {
   delete merged.pendingConfirmations;
   delete merged.deletedDefaultShopIds;
 
-  // Profile: fehlende neuere Felder (actionsSpent, actionsGrantedFor, ...) aus freshProfile() auffüllen.
+  // Profile: fehlende neuere Felder aus freshProfile() auffüllen, alte Cap-Felder entfernen.
   merged.profiles = (Array.isArray(merged.profiles) ? merged.profiles : []).map(p => {
     const fresh = Object.assign(freshProfile(), p);
     delete fresh.streakFreezes;
     delete fresh.streakFreezeUsedDates;
     delete fresh.doubleXpDate;
+    delete fresh.actionsToday;
+    delete fresh.actionsGrantedFor;
+    delete fresh.questXpToday;
     return fresh;
   });
 
@@ -653,9 +656,13 @@ function teamHpMax(state) {
   return getClass(a).teamHp + getClass(b).teamHp;
 }
 
+// Verdiente Kampf-Aktionen heute — vollständig aus der Anzahl der heute abgeschlossenen
+// Quests abgeleitet (Fibonacci-Schwellen), keine eigene Buchführung nötig.
 function getActionsEarnedToday(profile) {
   const today = todayBerlin();
-  return profile.actionsToday && profile.actionsToday.date === today ? profile.actionsToday.count : 0;
+  const progress = profile.questProgress[today] || {};
+  const completedCount = Object.values(progress).filter(v => v === 'komplett').length;
+  return actionsEarnedForQuestCount(completedCount);
 }
 
 function getActionsSpentToday(profile) {
@@ -679,52 +686,33 @@ function unlockedAbilities(profile) {
     });
 }
 
-function questStageXp(quest, stage) {
-  if (stage === 'komplett') return quest.xp;
-  if (stage === 'kurz') return Math.round(quest.xp * 0.4);
-  return 0;
-}
-
-// Tagesdeckel für Quest-XP: Basis 40, +5 für jede an diesem Tag komplett
-// abgeschlossene "schwere" Quest (20 XP). Wird aus dem ohnehin vorhandenen
-// questProgress berechnet, statt separat mitgezählt zu werden.
-function getQuestXpCapToday(state, profile, today) {
-  const progress = profile.questProgress[today] || {};
-  const hardQuestsDone = Object.keys(progress).filter(qId => {
-    if (progress[qId] !== 'komplett') return false;
-    const quest = state.quests.find(q => q.id === qId);
-    return quest && quest.xp === QUEST_HARD_XP_THRESHOLD;
-  }).length;
-  // Basis 50, +10 pro Level über Level 1, +5 pro heute abgeschlossener schwerer Quest
-  const levelBonus = (profile.level - 1) * 10;
-  return QUEST_XP_DAILY_BASE_CAP + levelBonus + hardQuestsDone * QUEST_XP_CAP_BONUS_PER_HARD_QUEST;
-}
-
-function getQuestXpEarnedToday(profile) {
-  const today = todayBerlin();
-  return profile.questXpToday && profile.questXpToday.date === today ? profile.questXpToday.amount : 0;
-}
-
 function addLog(state, text) {
   state.log = [{ id: uid('log'), ts: Date.now(), text }, ...state.log].slice(0, 60);
 }
 
 // Vergibt XP an ein Profil, behandelt dabei Level-Ups (auch mehrfach in Folge).
+// Jedes Level-Up gibt zusätzlich einen Ability-Upgrade-Punkt — unabhängig von den
+// Streak-Meilenstein-Punkten, daher wird NUR abilityUpgradePoints erhöht, nicht
+// streakUpgradePointsEarned (das bleibt einzig für die Streak-Fortschrittsanzeige reserviert).
 function grantXp(profile, amount) {
   profile.xp += amount;
   while (profile.xp >= xpForLevel(profile.level)) {
     profile.xp -= xpForLevel(profile.level);
     profile.level += 1;
+    profile.abilityUpgradePoints = (profile.abilityUpgradePoints || 0) + 1;
   }
 }
 
 // Kehrt grantXp() um — zieht XP wieder ab und macht dabei nötigenfalls auch
 // Level-Ups rückgängig (mehrfach in Folge, falls nötig). Geht nie unter Level 1.
+// Der beim Level-Up vergebene Ability-Punkt wird nur zurückgenommen, falls er noch
+// nicht ausgegeben wurde (das Guthaben geht dabei nie unter 0).
 function revokeXp(profile, amount) {
   profile.xp -= amount;
   while (profile.xp < 0 && profile.level > 1) {
     profile.level -= 1;
     profile.xp += xpForLevel(profile.level);
+    profile.abilityUpgradePoints = Math.max(0, (profile.abilityUpgradePoints || 0) - 1);
   }
   if (profile.xp < 0) profile.xp = 0; // Sicherheitsnetz auf Level 1
 }
@@ -888,6 +876,27 @@ function computeSportAnalysis(profile) {
   return { avgProtein, avgCalories, proteinPerKg, representativeWeight, weightSeries, proteinDays, caloriesDays };
 }
 
+// Trainings-Minuten aus abgeschlossenen Sport-Quests (letzte 7 Tage) — gruppiert
+// nach Titel (Cardio/Krafttraining/eigene), damit auch künftige eigene Sport-Quests
+// automatisch mitlaufen, ohne fest verdrahtet zu sein.
+function computeWorkoutAnalysis(profile) {
+  const today = todayBerlin();
+  const weekStart = addDaysToDateStr(today, -6);
+  const log = profile.sportQuestLog || {};
+  const byType = {};
+  const recent = [];
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysToDateStr(weekStart, i);
+    (log[d] || []).forEach(e => {
+      byType[e.title] = (byType[e.title] || 0) + (e.minutes || 0);
+      recent.push(Object.assign({ date: d }, e));
+    });
+  }
+  recent.sort((a, b) => b.ts - a.ts);
+  const totalMinutes = Object.values(byType).reduce((s, v) => s + v, 0);
+  return { byType, totalMinutes, recent: recent.slice(0, 10) };
+}
+
 function weekdayLabelFor(dateStr) {
   return WEEKDAY_LABELS[weekdayOfDateStr(dateStr)];
 }
@@ -1048,11 +1057,6 @@ function getCompletionLog(state, limit, viewerProfileId) {
   });
   out.sort((a, b) => (a.doneDate < b.doneDate ? 1 : a.doneDate > b.doneDate ? -1 : 0));
   return typeof limit === 'number' ? out.slice(0, limit) : out;
-}
-
-function getCalendarXpEarnedToday(profile) {
-  const today = todayBerlin();
-  return profile.calendarXpToday && profile.calendarXpToday.date === today ? profile.calendarXpToday.amount : 0;
 }
 
 // Aufgabe (nicht Termin) als erledigt markieren. Gibt 5 XP, gedeckelt bei 10 XP/Tag
@@ -1470,25 +1474,27 @@ function formatTimeHHMM(ts) {
 }
 
 // Eine Quest-Stufe abschließen. Gibt zurück, ob dadurch eine Kampf-Aktion frei wurde.
-function completeQuestStage(state, profileId, questId, stage, date = null) {
+// completeQuest: einstufig (kein "kurz" mehr). minutes ist nur für Sport-Quests relevant
+// (bestimmt die XP und wird für die Sport-Analyse mitgeschrieben).
+function completeQuestStage(state, profileId, questId, minutes = null, date = null) {
   const profile = state.profiles.find(p => p.id === profileId);
   const quest = state.quests.find(q => q.id === questId);
   if (!profile || !quest) return { xpGained: 0, actionGranted: false, leveledUp: false };
 
   const today = date || todayBerlin();
   if (!profile.questProgress[today]) profile.questProgress[today] = {};
-  const currentStage = profile.questProgress[today][questId] || null;
-
-  const stageOrder = { kurz: 1, komplett: 2 };
-  if (currentStage && stageOrder[currentStage] >= stageOrder[stage]) {
+  if (profile.questProgress[today][questId] === 'komplett') {
     return { xpGained: 0, actionGranted: false, leveledUp: false, alreadyDone: true };
   }
 
-  const before = currentStage ? questStageXp(quest, currentStage) : 0;
-  const after = questStageXp(quest, stage);
-  const delta = after - before;
+  // Kampf-Aktionen vor/nach dieser Erledigung — Basis für "wurde eine neue Aktion freigeschaltet".
+  const completedBefore = Object.values(profile.questProgress[today]).filter(v => v === 'komplett').length;
+  const actionsBefore = actionsEarnedForQuestCount(completedBefore);
 
-  profile.questProgress[today][questId] = stage;
+  const isSport = quest.category === SPORT_CATEGORY;
+  const gained = isSport ? sportQuestXp(minutes) : REGULAR_QUEST_XP;
+
+  profile.questProgress[today][questId] = 'komplett';
 
   // Streak-Meilensteine prüfen — Basis ist streakUpgradePointsEarned (wächst nie),
   // nicht abilityUpgradePoints (sinkt beim Ausgeben). So kein doppeltes Vergeben.
@@ -1505,51 +1511,34 @@ function completeQuestStage(state, profileId, questId, stage, date = null) {
     }
   }
 
-  if (!profile.questXpToday || profile.questXpToday.date !== today) {
-    profile.questXpToday = { date: today, amount: 0 };
-  }
-  const cap = getQuestXpCapToday(state, profile, today);
-  const headroom = Math.max(0, cap - profile.questXpToday.amount);
-  // Hat diese Quest eine aktive Frist (noch nicht abgelaufen)? → volle XP ohne Cap
-  const deadline = (profile.questDeadlines || {})[questId];
-  const hasActiveFrist = deadline && deadline.date >= today && stage === 'komplett';
-  const baseGained = hasActiveFrist ? delta : Math.min(delta, headroom);
-  const gained = baseGained;
-
   const levelBefore = profile.level;
   grantXp(profile, gained);
-  profile.questXpToday.amount += baseGained;
 
-  // Tatsächlich vergebene XP pro Quest/Tag mitschreiben (kumulativ, falls erst
-  // "kurz" und später "komplett" abgeschlossen wird) — Grundlage für ein exaktes Rückgängigmachen.
+  // Tatsächlich vergebene XP pro Quest/Tag mitschreiben — Grundlage für exaktes Rückgängigmachen.
   if (!profile.xpGrantedFor) profile.xpGrantedFor = {};
   if (!profile.xpGrantedFor[today]) profile.xpGrantedFor[today] = {};
-  profile.xpGrantedFor[today][questId] = (profile.xpGrantedFor[today][questId] || 0) + gained;
+  profile.xpGrantedFor[today][questId] = gained;
 
-  addLog(state, `📜 ${profile.name}: "${quest.title}" (${stage === 'kurz' ? 'kurz begonnen' : 'komplett'}) — +${gained} XP${baseGained < delta ? ' (Tages-XP-Limit erreicht)' : ''}.`);
-
-  // Eine Quest darf pro Tag nur EINE Kampf-Aktion auslösen — auch wenn sie
-  // erst "kurz" und später am selben Tag "komplett" abgeschlossen wird.
-  if (!profile.actionsGrantedFor) profile.actionsGrantedFor = {};
-  if (!profile.actionsGrantedFor[today]) profile.actionsGrantedFor[today] = {};
-  const alreadyGrantedForQuest = !!profile.actionsGrantedFor[today][questId];
-
-  if (profile.actionsToday.date !== today) profile.actionsToday = { date: today, count: 0 };
-  let actionGranted = false;
-  if (!alreadyGrantedForQuest && profile.actionsToday.count < MAX_ACTIONS_PER_DAY) {
-    profile.actionsToday.count += 1;
-    profile.actionsGrantedFor[today][questId] = true;
-    actionGranted = true;
+  // Sport-Quests: Minuten für die Sport-Analyse mitschreiben.
+  if (isSport) {
+    if (!profile.sportQuestLog) profile.sportQuestLog = {};
+    if (!profile.sportQuestLog[today]) profile.sportQuestLog[today] = [];
+    profile.sportQuestLog[today].push({ questId, title: quest.title, minutes: Math.max(0, Math.floor(minutes || 0)), xp: gained, ts: Date.now() });
   }
+
+  addLog(state, `📜 ${profile.name}: "${quest.title}" — +${gained} XP${isSport ? ` (${Math.max(0, Math.floor(minutes||0))} Min)` : ''}.`);
+
+  const completedAfter = completedBefore + 1;
+  const actionsAfter = actionsEarnedForQuestCount(completedAfter);
+  const actionGranted = actionsAfter > actionsBefore;
 
   return { xpGained: gained, actionGranted, leveledUp: profile.level > levelBefore };
 }
 
-// Macht eine heute abgeschlossene Quest-Stufe rückgängig ("verklickt"): nimmt
-// genau die XP zurück, die für diese Quest heute tatsächlich vergeben wurden
-// (berücksichtigt also einen evtl. gegriffenen Tages-Deckel korrekt), setzt
-// den Fortschritt zurück und nimmt eine dafür vergebene Kampf-Aktion zurück,
-// sofern diese noch nicht für eine Fähigkeit eingesetzt wurde.
+// Macht eine heute abgeschlossene Quest rückgängig ("verklickt"): nimmt die dafür
+// vergebenen XP zurück, entfernt einen evtl. Sport-Log-Eintrag, und die verdienten
+// Kampf-Aktionen sinken automatisch mit (rein aus der Quest-Anzahl abgeleitet) —
+// bereits für eine Fähigkeit eingesetzte Aktionen bleiben davon unberührt.
 function uncompleteQuestStage(state, profileId, questId) {
   const profile = state.profiles.find(p => p.id === profileId);
   const quest = state.quests.find(q => q.id === questId);
@@ -1557,33 +1546,26 @@ function uncompleteQuestStage(state, profileId, questId) {
 
   const today = todayBerlin();
   const progress = profile.questProgress[today] || {};
-  if (!progress[questId]) return { ok: false }; // heute nichts zum Rückgängigmachen vorhanden
+  if (progress[questId] !== 'komplett') return { ok: false }; // heute nichts zum Rückgängigmachen vorhanden
+
+  const completedBefore = Object.values(progress).filter(v => v === 'komplett').length;
+  const actionsBefore = actionsEarnedForQuestCount(completedBefore);
 
   const grantedToday = (profile.xpGrantedFor && profile.xpGrantedFor[today] && profile.xpGrantedFor[today][questId]) || 0;
-
-  if (grantedToday > 0) {
-    revokeXp(profile, grantedToday);
-    if (profile.questXpToday && profile.questXpToday.date === today) {
-      profile.questXpToday.amount = Math.max(0, profile.questXpToday.amount - grantedToday);
-    }
-  }
+  if (grantedToday > 0) revokeXp(profile, grantedToday);
   if (profile.xpGrantedFor && profile.xpGrantedFor[today]) delete profile.xpGrantedFor[today][questId];
 
   delete profile.questProgress[today][questId];
 
-  // Dafür vergebene Kampf-Aktion nur zurücknehmen, wenn sie noch ungenutzt ist —
-  // bereits für eine Fähigkeit eingesetzte Aktionen bleiben unangetastet, und das
-  // "schon vergeben"-Flag bleibt dann bewusst stehen, um Doppelvergabe zu verhindern.
-  let actionRevoked = false;
-  if (profile.actionsGrantedFor && profile.actionsGrantedFor[today] && profile.actionsGrantedFor[today][questId]) {
-    const earned = getActionsEarnedToday(profile);
-    const spent = getActionsSpentToday(profile);
-    if (spent < earned) {
-      profile.actionsToday.count = Math.max(0, profile.actionsToday.count - 1);
-      delete profile.actionsGrantedFor[today][questId];
-      actionRevoked = true;
-    }
+  // Zugehörigen Sport-Log-Eintrag von heute entfernen (der zuletzt für diese Quest erfasste).
+  if (profile.sportQuestLog && profile.sportQuestLog[today]) {
+    const idx = profile.sportQuestLog[today].map(e => e.questId).lastIndexOf(questId);
+    if (idx >= 0) profile.sportQuestLog[today].splice(idx, 1);
   }
+
+  const completedAfter = completedBefore - 1;
+  const actionsAfter = actionsEarnedForQuestCount(completedAfter);
+  const actionRevoked = actionsAfter < actionsBefore && getActionsSpentToday(profile) < actionsBefore;
 
   addLog(state, `↩️ ${profile.name}: "${quest.title}" rückgängig gemacht${grantedToday > 0 ? ` — -${grantedToday} XP` : ''}.`);
 
@@ -1734,9 +1716,38 @@ function WeightChart({ series }) {
 
 function SportAnalysisModal({ profile, onClose }) {
   const a = computeSportAnalysis(profile);
+  const w = computeWorkoutAnalysis(profile);
+  const byTypeEntries = Object.entries(w.byType);
   return (
     <Modal title="📊 Sport-Analyse" onClose={onClose} wide>
       <div className="space-y-4">
+        <div>
+          <SectionLabel>Training (letzte 7 Tage)</SectionLabel>
+          {byTypeEntries.length === 0 ? (
+            <div className="text-xs text-inkDim">Noch keine Sport-Quests diese Woche erledigt.</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {byTypeEntries.map(([title, mins]) => (
+                <div key={title} className="bg-surface border border-border rounded-xl p-3">
+                  <div className="text-[10px] text-inkDim uppercase tracking-wide">{title}</div>
+                  <div className="text-xl font-stat font-bold text-sport mt-1">{formatHM(mins)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {w.recent.length > 0 && (
+            <div className="mt-2.5 space-y-1">
+              <div className="text-[10px] text-inkDim font-semibold">Letzte Einträge</div>
+              {w.recent.map((e, i) => (
+                <div key={i} className="flex justify-between text-xs text-inkDim">
+                  <span>{e.date} · {e.title}</span>
+                  <span className="text-sport">{formatHM(e.minutes)} · +{e.xp} XP</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="h-px bg-border" />
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-surface border border-border rounded-xl p-3">
             <div className="text-[10px] text-inkDim uppercase tracking-wide">Protein / kg Gewicht</div>
@@ -2377,7 +2388,6 @@ function ProfileEditor({ profile, isNew, onSave, onCancel }) {
 
 function AddQuestModal({ categories, onAdd, onClose }) {
   const [title, setTitle] = useState('');
-  const [xp, setXp] = useState(10);
   const [icon, setIcon] = useState('📌');
   const [category, setCategory] = useState(categories[0] || '');
   const [newCategoryMode, setNewCategoryMode] = useState(false);
@@ -2385,6 +2395,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
 
   const finalCategory = newCategoryMode ? newCategoryName.trim() : category;
   const canSave = title.trim().length > 0 && finalCategory.length > 0;
+  const isSport = finalCategory === SPORT_CATEGORY;
 
   return (
     <Modal title="Neue Quest" onClose={onClose}>
@@ -2420,18 +2431,10 @@ function AddQuestModal({ categories, onAdd, onClose }) {
               className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 mt-2" />
           )}
         </div>
-        <div>
-          <SectionLabel>XP-Wert</SectionLabel>
-          <div className="flex gap-2">
-            {[5, 10, 20].map(v => (
-              <button key={v} onClick={() => setXp(v)}
-                className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-stat font-semibold ${
-                  xp === v ? 'border-gold bg-gold/10 text-gold' : 'border-border bg-surface text-inkDim'
-                }`}>
-                {v} XP
-              </button>
-            ))}
-          </div>
+        <div className="text-xs text-inkDim">
+          {isSport
+            ? 'Sport-Quest: beim Erledigen wirst du nach Minuten gefragt (3 XP + 3 XP pro 5 Minuten).'
+            : `Diese Quest gibt ${REGULAR_QUEST_XP} XP.`}
         </div>
         <div>
           <SectionLabel>Icon (Emoji)</SectionLabel>
@@ -2440,7 +2443,7 @@ function AddQuestModal({ categories, onAdd, onClose }) {
             className="w-20 bg-surface border border-border rounded-xl px-3 py-2.5 text-xl text-center" />
         </div>
         <button disabled={!canSave}
-          onClick={() => onAdd({ title: title.trim(), xp, icon: icon || '📌', category: finalCategory })}
+          onClick={() => onAdd({ title: title.trim(), icon: icon || '📌', category: finalCategory })}
           className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
           Quest hinzufügen
         </button>
@@ -2449,58 +2452,6 @@ function AddQuestModal({ categories, onAdd, onClose }) {
   );
 }
 
-function DeleteQuestsModal({ quests, categories, onDelete, onClose }) {
-  const [selected, setSelected] = useState(() => new Set());
-
-  function toggle(id) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  return (
-    <Modal title="Aufgaben löschen" onClose={onClose} wide>
-      <div className="text-xs text-inkDim mb-3">Tippe Aufgaben an, um sie auszuwählen, und lösche sie dauerhaft.</div>
-      <div className="space-y-4 max-h-[50vh] overflow-y-auto">
-        {categories.map(cat => {
-          const inCat = quests.filter(q => q.category === cat);
-          if (inCat.length === 0) return null;
-          return (
-            <div key={cat}>
-              <SectionLabel>{cat}</SectionLabel>
-              <div className="space-y-1.5">
-                {inCat.map(q => {
-                  const isSelected = selected.has(q.id);
-                  return (
-                    <button key={q.id} onClick={() => toggle(q.id)}
-                      className={`w-full text-left rounded-xl border px-3 py-2 flex items-center gap-2.5 ${
-                        isSelected ? 'border-hp bg-hp/10' : 'border-border bg-surface'
-                      }`}>
-                      <span className="text-lg shrink-0">{q.icon}</span>
-                      <span className="text-sm flex-1 min-w-0 truncate">{q.title}</span>
-                      <span className="text-[10px] text-inkDim font-stat shrink-0">{q.xp} XP</span>
-                      <span className={`w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] ${
-                        isSelected ? 'bg-hp border-hp text-ink' : 'border-border'
-                      }`}>{isSelected ? '✓' : ''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <button disabled={selected.size === 0} onClick={() => onDelete([...selected])}
-        className="w-full bg-hp disabled:opacity-30 text-ink font-semibold rounded-xl py-3 mt-4">
-        {selected.size > 0 ? `${selected.size} Aufgabe${selected.size > 1 ? 'n' : ''} löschen` : 'Aufgaben löschen'}
-      </button>
-    </Modal>
-  );
-}
-
-// Grip-Handle-Icon (3 horizontale Striche)
 // Sofortiges Löschen ohne Bestätigung — in Edit-Modals ohnehin erst nach "Speichern" wirksam.
 function DeleteButton({ onDelete, message = 'Wirklich löschen?', className = '' }) {
   return (
@@ -2799,12 +2750,6 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
                               enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
                               className="w-14 bg-surface border border-border rounded-lg px-2 py-2 text-xl text-center" />
                           </div>
-                          <select value={String(q.xp)} onChange={e => liveUpdate({ xp: Number(e.target.value) })}
-                            className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-ink font-stat">
-                            <option value="5">5 XP</option>
-                            <option value="10">10 XP</option>
-                            <option value="20">20 XP</option>
-                          </select>
                           <select value={q.category} onChange={e => liveUpdate({ category: e.target.value })}
                             className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-ink">
                             {cats.map(c => <option key={c} value={c}>{c}</option>)}
@@ -2823,7 +2768,7 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
                           </div>
                           <span className="text-base shrink-0">{q.icon}</span>
                           <span className="text-sm text-ink flex-1 min-w-0 truncate">{q.title}</span>
-                          <span className="text-[10px] font-stat text-gold shrink-0">{q.xp} XP</span>
+                          <span className="text-[10px] font-stat text-gold shrink-0">{q.category === SPORT_CATEGORY ? 'Sport' : `${REGULAR_QUEST_XP} XP`}</span>
                           <button onClick={() => setEditingId(q.id)}
                             className="w-7 h-7 rounded-lg border border-border bg-bgElevated text-inkDim text-xs active:scale-90 flex items-center justify-center shrink-0">✏️</button>
                           <DeleteButton onDelete={() => setQsSafe(prev => prev.filter(item => item.id !== q.id))} />
@@ -2842,6 +2787,34 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
       </button>
     </Modal>
     </>
+  );
+}
+
+// Minuten-Eingabe beim Erledigen einer Sport-Quest (Cardio/Krafttraining/eigene) —
+// bestimmt die XP (3 + 3 pro angefangene 5 Minuten) und fließt in die Sport-Analyse ein.
+function SportMinutesModal({ quest, onSave, onClose }) {
+  const [minutes, setMinutes] = useState('30');
+  const parsed = parseInt(minutes);
+  const valid = /^\d+$/.test(minutes);
+  const xpPreview = valid ? sportQuestXp(parsed) : null;
+
+  return (
+    <Modal title={`${quest.icon} ${quest.title}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="text-xs text-inkDim">Wie viele Minuten hast du trainiert?</div>
+        <input type="text" inputMode="numeric" value={minutes}
+          onChange={e => setMinutes(e.target.value.replace(/\D/g, ''))}
+          enterKeyHint="done" onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+          autoFocus
+          className="w-full bg-surface border border-border rounded-xl px-3 py-3 text-center text-2xl font-stat text-ink" />
+        <div className="text-xs text-center text-inkDim">{valid ? `= ${xpPreview} XP` : '–'}</div>
+        <button disabled={!valid}
+          onClick={() => onSave(parsed)}
+          className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
+          Eintragen
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -2956,13 +2929,14 @@ function DeadlineCarousel({ deadlines, onComplete }) {
   );
 }
 
-function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDeadline }) {
+function QuestCard({ quest, done, deadline, onComplete, onUncomplete, onSetDeadline }) {
   const [expanded, setExpanded] = useState(false);
   const [showDeadline, setShowDeadline] = useState(false);
   const today = todayBerlin();
+  const isSport = quest.category === SPORT_CATEGORY;
 
   // Frist inaktiv wenn: abgelaufen oder heute erledigt
-  const activeDeadline = deadline && deadline.date >= today && stage !== 'komplett'
+  const activeDeadline = deadline && deadline.date >= today && !done
     ? deadline : null;
   const deadlineToday = activeDeadline && activeDeadline.date === today;
 
@@ -2979,7 +2953,9 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
           {quest.title}
         </button>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-inkDim font-stat">{quest.xp} XP voll · {Math.round(quest.xp * 0.4)} XP kurz</span>
+          <span className="text-xs text-inkDim font-stat">
+            {isSport ? '3 XP + 3 XP/5 Min' : `${REGULAR_QUEST_XP} XP`}
+          </span>
           {activeDeadline && (() => {
             const label = deadlineLabel(activeDeadline.date);
             const urgent = daysUntil(activeDeadline.date) <= 1;
@@ -2993,27 +2969,16 @@ function QuestCard({ quest, stage, deadline, onComplete, onUncomplete, onSetDead
         </div>
       </div>
       <div className="flex gap-1.5 shrink-0 items-center">
-        {stage !== 'komplett' && (
-          <button
-            onClick={() => onComplete('kurz')}
-            disabled={stage === 'kurz'}
-            className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
-              stage === 'kurz' ? 'bg-gold/20 border-gold/40 text-gold' : 'bg-bgElevated border-border text-inkDim active:scale-95'
-            } disabled:opacity-50`}
-          >
-            Kurz
-          </button>
-        )}
         <button
-          onClick={() => onComplete('komplett')}
-          disabled={stage === 'komplett'}
+          onClick={onComplete}
+          disabled={done}
           className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
-            stage === 'komplett' ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim active:scale-95'
+            done ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim active:scale-95'
           } disabled:opacity-50`}
         >
-          ✓
+          {done ? '✓' : (isSport ? '⏱' : '✓')}
         </button>
-        {stage && (
+        {done && (
           <button
             onClick={onUncomplete}
             title="Rückgängig"
@@ -3062,9 +3027,9 @@ function QuestCategorySection({ category, quests, todayProgress, questDeadlines,
             <QuestCard
               key={q.id}
               quest={q}
-              stage={todayProgress[q.id] || null}
+              done={todayProgress[q.id] === 'komplett'}
               deadline={(questDeadlines || {})[q.id] || null}
-              onComplete={(stage) => onComplete(q.id, stage)}
+              onComplete={() => onComplete(q.id)}
               onUncomplete={() => onUncomplete(q.id)}
               onSetDeadline={onSetDeadline}
             />
@@ -3075,19 +3040,27 @@ function QuestCategorySection({ category, quests, todayProgress, questDeadlines,
   );
 }
 
-function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onDeleteQuests, onEditQuests, onSetDeadline, onCalendarComplete, onCalendarUncomplete, onOpenAddCalendar, onOpenEditCalendar }) {
+function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQuest, onEditQuests, onSetDeadline, onCalendarComplete, onCalendarUncomplete, onOpenAddCalendar, onOpenEditCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const today = todayBerlin();
   const todayProgress = profile.questProgress[today] || {};
+  const completedTodayCount = Object.values(todayProgress).filter(v => v === 'komplett').length;
   const actionsEarned = getActionsEarnedToday(profile);
   const actionsAvailable = getAvailableActions(profile);
-  const questXpEarned = getQuestXpEarnedToday(profile);
-  const questXpCap = getQuestXpCapToday(state, profile, today);
+  const questsUntilNextAction = nextActionThreshold(completedTodayCount) - completedTodayCount;
   const allDone = state.quests.length > 0 && state.quests.every(q => todayProgress[q.id] === 'komplett');
   const someDone = state.quests.some(q => todayProgress[q.id]);
   const todayAgenda = sortAgendaEntries(getTodayAgenda(state, today, profile.id).filter(e => !e.done));
   const questDeadlines = profile.questDeadlines || {};
+  const [sportMinutesQuest, setSportMinutesQuest] = useState(null); // Quest-Objekt oder null
+
+  function requestComplete(questId) {
+    const quest = state.quests.find(q => q.id === questId);
+    if (!quest) return;
+    if (quest.category === SPORT_CATEGORY) setSportMinutesQuest(quest);
+    else onQuestComplete(questId, null);
+  }
 
   // Offene Fristen für den Quest-Tab
   const upcomingDeadlinesForQuestTab = Object.entries(questDeadlines)
@@ -3116,7 +3089,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
       {upcomingDeadlinesForQuestTab.length > 0 && (
         <DeadlineCarousel
           deadlines={upcomingDeadlinesForQuestTab}
-          onComplete={(questId) => onQuestComplete(questId, 'komplett')}
+          onComplete={(questId) => requestComplete(questId)}
         />
       )}
 
@@ -3126,9 +3099,9 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
           {allDone && <span className="ml-2 text-sm font-sans font-normal text-gold">🌟 Alles erledigt!</span>}
         </div>
         <div className="text-right">
-          <div className="font-stat text-sm text-gold">{actionsEarned}/{MAX_ACTIONS_PER_DAY}</div>
-          <div className="text-[10px] text-inkDim">Kampf-Aktionen</div>
-          <div className="font-stat text-xs text-heal mt-1">{questXpEarned}/{questXpCap} XP</div>
+          <div className="font-stat text-sm text-gold">⚔️ {actionsEarned}</div>
+          <div className="text-[10px] text-inkDim">Kampf-Aktionen heute</div>
+          <div className="text-[10px] text-inkDim mt-0.5">noch {questsUntilNextAction} bis zur nächsten</div>
         </div>
       </div>
 
@@ -3140,7 +3113,7 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
             quests={state.quests.filter(q => q.category === cat)}
             todayProgress={todayProgress}
             questDeadlines={questDeadlines}
-            onComplete={onQuestComplete}
+            onComplete={(questId) => requestComplete(questId)}
             onUncomplete={onQuestUncomplete}
             onSetDeadline={onSetDeadline}
             defaultOpen={false}
@@ -3179,17 +3152,6 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
         );
       })()}
 
-      {actionsEarned >= MAX_ACTIONS_PER_DAY && (
-        <div className="text-xs text-inkDim text-center">
-          Tageslimit für Kampf-Aktionen erreicht — weitere Quests geben noch XP, lösen aber keine Fähigkeit mehr aus.
-        </div>
-      )}
-      {questXpEarned >= questXpCap && (
-        <div className="text-xs text-inkDim text-center">
-          Tages-XP-Limit erreicht ({questXpCap} XP) — weitere Quests werden noch protokolliert, geben aber keine XP mehr. Eine weitere 20XP-Quest komplett erledigen erhöht das Limit um {QUEST_XP_CAP_BONUS_PER_HARD_QUEST}.
-        </div>
-      )}
-
       {showAdd && (
         <AddQuestModal categories={state.questCategories} onClose={() => setShowAdd(false)}
           onAdd={(q) => { onAddQuest(q); setShowAdd(false); }} />
@@ -3198,6 +3160,13 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
         <QuestEditModal quests={state.quests} categories={state.questCategories}
           onClose={() => setShowEdit(false)}
           onSave={(cats, qs) => { onEditQuests(cats, qs); setShowEdit(false); }} />
+      )}
+      {sportMinutesQuest && (
+        <SportMinutesModal
+          quest={sportMinutesQuest}
+          onSave={(mins) => { onQuestComplete(sportMinutesQuest.id, mins); setSportMinutesQuest(null); }}
+          onClose={() => setSportMinutesQuest(null)}
+        />
       )}
     </div>
   );
@@ -3213,7 +3182,10 @@ function AbilityUpgradeModal({ profile, onUpgrade, onClose }) {
   const points = profile.abilityUpgradePoints || 0;
   const upgrades = profile.abilityUpgrades || {};
   const abilities = unlockedAbilities(profile);
-  const nextMilestone = nextStreakUpgradeMilestone(points);
+  // WICHTIG: nextMilestone muss aus dem NIE sinkenden streakUpgradePointsEarned kommen,
+  // nicht aus abilityUpgradePoints (das beim Ausgeben sinkt) — sonst würde hier nach
+  // dem Ausgeben eines Punktes immer wieder "10 Tage" stehen, egal wie hoch die Streak ist.
+  const nextMilestone = nextStreakUpgradeMilestone(profile.streakUpgradePointsEarned || 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={onClose}>
@@ -3325,7 +3297,7 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
         const classColor = cls.id === 'krieger' ? '#c1543c' : cls.id === 'magier' ? '#7d70e0' : '#9fd6c4';
         const upgradePoints = p.abilityUpgradePoints || 0;
         const upgrades = p.abilityUpgrades || {};
-        const nextMilestone = nextStreakUpgradeMilestone(upgradePoints);
+        const nextMilestone = nextStreakUpgradeMilestone(p.streakUpgradePointsEarned || 0);
         return (
           <div key={p.id} className="rounded-2xl border overflow-hidden bg-surface" style={{ borderColor: classColor + '40' }}>
             {/* Header mit Gradient */}
@@ -3453,7 +3425,7 @@ function CombatTab({ state, profiles, activeProfileId, onUseAbility, onUpgradeAb
    11. TAB: MEHR (Profil, Kalender, Bibliothek, Export)
    ============================================================ */
 
-function CalendarGrid({ profile, quests, calendarItems, selectedDate, onSelectDate, birthdays }) {
+function CalendarGrid({ profile, calendarItems, selectedDate, onSelectDate, birthdays }) {
   const [monthOffset, setMonthOffset] = useState(0);
   const [slideDir, setSlideDir] = useState('right'); // Richtung der letzten Monats-Animation
   const [showMonthPicker, setShowMonthPicker] = useState(false);
@@ -3689,30 +3661,6 @@ function MethodsLibrary({ profile }) {
         );
       })}
     </div>
-  );
-}
-
-function ItemDateModal({ item, onSave, onClose }) {
-  const [date, setDate] = useState(item.plannedDate || '');
-  return (
-    <Modal title={`Datum für "${item.title}"`} onClose={onClose}>
-      <div className="space-y-4">
-        <div>
-          <SectionLabel>Geplantes Datum</SectionLabel>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)}
-            className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 font-stat" />
-        </div>
-        <button onClick={() => onSave(date || null)}
-          className="w-full bg-gold text-bg font-semibold rounded-xl py-3">
-          Speichern
-        </button>
-        {item.plannedDate && (
-          <button onClick={() => onSave(null)} className="w-full text-xs text-inkDim text-center">
-            Datum entfernen
-          </button>
-        )}
-      </div>
-    </Modal>
   );
 }
 
@@ -3952,12 +3900,10 @@ function MoreTab({ state, profile, pairingCode, connStatus, onSwitchProfile, onE
               <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-bg transition-all ${profile.sportTrackingEnabled ? 'left-5' : 'left-0.5'}`}></span>
             </button>
           </div>
-          {profile.sportTrackingEnabled && (
-            <button onClick={() => setShowSportAnalysis(true)}
-              className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
-              📊 Sport-Analyse
-            </button>
-          )}
+          <button onClick={() => setShowSportAnalysis(true)}
+            className="w-full border border-dashed border-sport/50 rounded-2xl py-3 text-sm text-sport active:scale-[0.99]">
+            📊 Sport-Analyse
+          </button>
         </div>
       )}
 
@@ -4131,7 +4077,7 @@ function WorkSettings({ work, onChange }) {
   );
 }
 
-function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay, onDeleteSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset }) {
+function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay, onDeleteSickDay, onAddVacation, onDeleteVacation, onBuyOvertime, onConvertVacToOT, onReset, onSetOvertimeManually }) {
   const work = profile.work || {};
 
   // ---- alle Hooks zuerst ----
@@ -4141,6 +4087,8 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay
   const [sickTo, setSickTo] = useState(todayBerlin());
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [showBuyOT, setShowBuyOT] = useState(false);
+  const [showManualOT, setShowManualOT] = useState(false);
+  const [manualOTValue, setManualOTValue] = useState('0');
   const [buyOTAmount, setBuyOTAmount] = useState('1');
   const [showVacToOT, setShowVacToOT] = useState(false);
   const [vacToOTDays, setVacToOTDays] = useState('0.5');
@@ -4158,6 +4106,7 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay
 
   useBackButton(showResetConfirm, () => setShowResetConfirm(false));
   useBackButton(showBuyOT, () => setShowBuyOT(false));
+  useBackButton(showManualOT, () => setShowManualOT(false));
   useBackButton(showVacToOT, () => setShowVacToOT(false));
   useBackButton(showVacation, () => setShowVacation(false));
   useBackButton(showSick, () => setShowSick(false));
@@ -4278,7 +4227,13 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay
         {/* Infoleiste */}
         <div className="w-full grid grid-cols-2 gap-3">
           <div className="bg-surface border border-border rounded-2xl p-3.5 flex flex-col gap-2">
-            <div className="text-[10px] text-inkDim uppercase tracking-wide">Überstundenkonto</div>
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] text-inkDim uppercase tracking-wide">Überstundenkonto</div>
+              <button onClick={() => { setManualOTValue(String(Math.round(work.overtimeMinutes||0))); setShowManualOT(true); }}
+                className="text-inkDim text-xs active:scale-90" title="Manuell korrigieren">
+                ✎
+              </button>
+            </div>
             <div className={`font-stat text-lg font-bold ${work.overtimeMinutes >= 0 ? 'text-heal' : 'text-hp'}`}>
               {formatHM(work.overtimeMinutes||0)}
             </div>
@@ -4321,6 +4276,33 @@ function WorkTimerScreen({ profile, onClose, onClockIn, onClockOut, onAddSickDay
                   disabled={profile.gold < (parseInt(buyOTAmount)||0) || (parseInt(buyOTAmount)||0) < 1}
                   className="flex-1 bg-gold/20 border border-gold/50 text-gold disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold">
                   Kaufen
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Überstundenkonto manuell korrigieren — falls Testdaten/alte Bugs den Wert
+            verfälscht haben und sich das nicht automatisch zurückrechnen lässt. */}
+        {showManualOT && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 px-4">
+            <div className="w-full max-w-sm bg-bgElevated border border-border rounded-2xl p-5 space-y-4">
+              <div className="font-display font-bold text-gold">Überstundenkonto korrigieren</div>
+              <div className="text-xs text-inkDim">Aktuell: {formatHM(work.overtimeMinutes||0)} · Wert in Minuten eingeben (negativ = Minus-Konto)</div>
+              <input type="text" inputMode="numeric" value={manualOTValue}
+                onChange={e => setManualOTValue(e.target.value.replace(/[^-\d]/g, ''))}
+                className="w-full bg-surface border border-border rounded-xl px-3 py-2.5 text-sm text-ink text-center font-stat" />
+              <div className="text-xs text-center text-inkDim">
+                {/^-?\d+$/.test(manualOTValue) ? `= ${formatHM(parseInt(manualOTValue))}` : '–'}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setShowManualOT(false)} className="flex-1 border border-border rounded-xl py-2.5 text-sm text-inkDim">Abbrechen</button>
+                <button onClick={() => {
+                    if (/^-?\d+$/.test(manualOTValue)) { onSetOvertimeManually(parseInt(manualOTValue)); setShowManualOT(false); }
+                  }}
+                  disabled={!/^-?\d+$/.test(manualOTValue)}
+                  className="flex-1 bg-gold/20 border border-gold/50 text-gold disabled:opacity-30 rounded-xl py-2.5 text-sm font-semibold">
+                  Speichern
                 </button>
               </div>
             </div>
@@ -5394,19 +5376,17 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
     );
   }
 
-  function handleQuestComplete(questId, stage, date = null) {
+  function handleQuestComplete(questId, minutes = null, date = null) {
     let result;
     const next = update(s => {
-      result = completeQuestStage(s, activeProfile.id, questId, stage, date);
+      result = completeQuestStage(s, activeProfile.id, questId, minutes, date);
       // Frist nach Erledigung löschen
-      if (stage === 'komplett') {
-        const p = s.profiles.find(pr => pr.id === activeProfile.id);
-        if (p && p.questDeadlines) delete p.questDeadlines[questId];
-      }
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (p && p.questDeadlines) delete p.questDeadlines[questId];
     });
     if (result.alreadyDone) return;
     const newLevel = next.profiles.find(p => p.id === activeProfile.id).level;
-    if (result.leveledUp) pushToast(`🎉 Level Up! ${activeProfile.name} ist jetzt Level ${newLevel}.`, 'levelup');
+    if (result.leveledUp) pushToast(`🎉 Level Up! ${activeProfile.name} ist jetzt Level ${newLevel} — +1 Ability-Upgrade-Punkt.`, 'levelup');
     pushToast(
       result.actionGranted ? `Quest erledigt! +${result.xpGained} XP, +1 Kampf-Aktion` : `Quest erledigt! +${result.xpGained} XP`,
       'info'
@@ -5466,8 +5446,37 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
   function handleUpdateWorkSettings(newWork) {
     update(s => {
       const p = s.profiles.find(pr => pr.id === activeProfile.id);
-      if (p) p.work = { ...(p.work||{}), ...newWork };
+      if (!p) return;
+      const oldStartDate = p.work?.startDate || null;
+      p.work = { ...(p.work||{}), ...newWork };
+
+      // Anstellungsbeginn geändert (und tatsächlich gesetzt)? Dann gilt alles vor
+      // diesem Datum als "vor dem Job" — sowohl fälschlich gebuchte Fehltage als
+      // auch Arbeitstage mit Minus/Plus aus der Testphase werden storniert und
+      // aus dem Log entfernt. Das Konto startet damit sauber ab dem neuen Datum.
+      if ('startDate' in newWork && newWork.startDate && newWork.startDate !== oldStartDate) {
+        const newStart = newWork.startDate;
+        const toReverse = (p.work.workLog || []).filter(e => e.date < newStart);
+        if (toReverse.length > 0) {
+          toReverse.forEach(e => {
+            p.work.overtimeMinutes = (p.work.overtimeMinutes || 0) - (e.overtimeDelta || 0);
+          });
+          p.work.workLog = (p.work.workLog || []).filter(e => e.date >= newStart);
+          addLog(s, `🔄 ${p.name}: Anstellungsbeginn geändert — ${toReverse.length} Eintrag${toReverse.length > 1 ? 'e' : ''} vor dem ${newStart.split('-').reverse().join('.')} storniert (Konto ab jetzt bei diesem Datum sauber).`);
+        }
+      }
     });
+  }
+
+  function handleSetOvertimeManually(newValue) {
+    update(s => {
+      const p = s.profiles.find(pr => pr.id === activeProfile.id);
+      if (!p || !p.work) return;
+      const before = p.work.overtimeMinutes || 0;
+      p.work.overtimeMinutes = newValue;
+      addLog(s, `✎ ${p.name}: Überstundenkonto manuell von ${formatHM(before)} auf ${formatHM(newValue)} korrigiert.`);
+    });
+    pushToast('Überstundenkonto aktualisiert.', 'info');
   }
 
   function handleWorkReset(mode) {
@@ -5712,14 +5721,9 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
 
   function handleAddQuest(q) {
     update(s => {
-      s.quests.push({ id: uid('quest'), title: q.title, xp: q.xp, icon: q.icon, category: q.category, custom: true });
+      s.quests.push({ id: uid('quest'), title: q.title, icon: q.icon, category: q.category, custom: true });
       if (!s.questCategories.includes(q.category)) s.questCategories.push(q.category);
     });
-  }
-
-  function handleDeleteQuests(ids) {
-    update(s => { s.quests = s.quests.filter(q => !ids.includes(q.id)); });
-    pushToast(ids.length > 1 ? `${ids.length} Aufgaben gelöscht.` : 'Aufgabe gelöscht.', 'info');
   }
 
   function handleEditQuests(newCategories, newQuests) {
@@ -5961,6 +5965,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
           onBuyOvertime={handleBuyOvertime}
           onConvertVacToOT={handleConvertVacToOT}
           onReset={handleWorkReset}
+          onSetOvertimeManually={handleSetOvertimeManually}
         />
       )}
 
@@ -6020,7 +6025,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       </div>
 
       {activeTab === 'quests' && (
-        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onDeleteQuests={handleDeleteQuests} onEditQuests={handleEditQuests} onSetDeadline={handleSetDeadline}
+        <QuestsTab state={state} profile={activeProfile} onQuestComplete={handleQuestComplete} onQuestUncomplete={handleQuestUncomplete} onAddQuest={handleAddQuest} onEditQuests={handleEditQuests} onSetDeadline={handleSetDeadline}
           onCalendarComplete={handleCalendarComplete}
           onCalendarUncomplete={handleCalendarUncomplete}
           onOpenAddCalendar={() => setCalendarModal({ mode: 'add', date: todayBerlin() })}
@@ -6031,7 +6036,7 @@ function TeamQuestApp({ pairingCode, onUnpair }) {
       )}
       {activeTab === 'kalender' && (
         <div className="px-4 pt-4 pb-28 space-y-4">
-          <CalendarGrid profile={activeProfile} quests={state.quests} calendarItems={state.calendarItems}
+          <CalendarGrid profile={activeProfile} calendarItems={state.calendarItems}
             birthdays={state.birthdays || []}
             selectedDate={calendarSelectedDate} onSelectDate={setCalendarSelectedDate} />
           <button onClick={() => setCalendarModal({ mode: 'add', date: calendarViewedDate })}
