@@ -1483,7 +1483,12 @@ function completeQuestStage(state, profileId, questId, minutes = null, date = nu
 
   const today = date || todayBerlin();
   if (!profile.questProgress[today]) profile.questProgress[today] = {};
-  if (profile.questProgress[today][questId] === 'komplett') {
+  const isSport = quest.category === SPORT_CATEGORY;
+  const alreadyDoneToday = profile.questProgress[today][questId] === 'komplett';
+
+  // Normale Quests: nur einmal pro Tag. Sport-Quests: mehrere Trainingseinheiten
+  // am selben Tag sind erlaubt — jede weitere Session kommt oben drauf.
+  if (alreadyDoneToday && !isSport) {
     return { xpGained: 0, actionGranted: false, leveledUp: false, alreadyDone: true };
   }
 
@@ -1491,14 +1496,13 @@ function completeQuestStage(state, profileId, questId, minutes = null, date = nu
   const completedBefore = Object.values(profile.questProgress[today]).filter(v => v === 'komplett').length;
   const actionsBefore = actionsEarnedForQuestCount(completedBefore);
 
-  const isSport = quest.category === SPORT_CATEGORY;
   const gained = isSport ? sportQuestXp(minutes) : REGULAR_QUEST_XP;
 
   profile.questProgress[today][questId] = 'komplett';
 
-  // Streak-Meilensteine prüfen — Basis ist streakUpgradePointsEarned (wächst nie),
-  // nicht abilityUpgradePoints (sinkt beim Ausgeben). So kein doppeltes Vergeben.
-  if (today === todayBerlin()) {
+  // Streak-Meilensteine nur beim allerersten Abschluss dieser Quest heute prüfen —
+  // bei einer zusätzlichen Sport-Session hat sich an der Streak selbst nichts geändert.
+  if (!alreadyDoneToday && today === todayBerlin()) {
     const newStreak = computeStreak(profile);
     let milestonesGained = 0;
     while (newStreak >= nextStreakUpgradeMilestone(profile.streakUpgradePointsEarned || 0)) {
@@ -1514,12 +1518,13 @@ function completeQuestStage(state, profileId, questId, minutes = null, date = nu
   const levelBefore = profile.level;
   grantXp(profile, gained);
 
-  // Tatsächlich vergebene XP pro Quest/Tag mitschreiben — Grundlage für exaktes Rückgängigmachen.
+  // Tatsächlich vergebene XP pro Quest/Tag mitschreiben (kumulativ bei mehreren Sport-
+  // Sessions am selben Tag) — Grundlage für exaktes Rückgängigmachen.
   if (!profile.xpGrantedFor) profile.xpGrantedFor = {};
   if (!profile.xpGrantedFor[today]) profile.xpGrantedFor[today] = {};
-  profile.xpGrantedFor[today][questId] = gained;
+  profile.xpGrantedFor[today][questId] = (profile.xpGrantedFor[today][questId] || 0) + gained;
 
-  // Sport-Quests: Minuten für die Sport-Analyse mitschreiben.
+  // Sport-Quests: jede Session als eigener Eintrag für die Sport-Analyse.
   if (isSport) {
     if (!profile.sportQuestLog) profile.sportQuestLog = {};
     if (!profile.sportQuestLog[today]) profile.sportQuestLog[today] = [];
@@ -1528,15 +1533,16 @@ function completeQuestStage(state, profileId, questId, minutes = null, date = nu
 
   addLog(state, `📜 ${profile.name}: "${quest.title}" — +${gained} XP${isSport ? ` (${Math.max(0, Math.floor(minutes||0))} Min)` : ''}.`);
 
-  const completedAfter = completedBefore + 1;
+  const completedAfter = Object.values(profile.questProgress[today]).filter(v => v === 'komplett').length;
   const actionsAfter = actionsEarnedForQuestCount(completedAfter);
   const actionGranted = actionsAfter > actionsBefore;
 
   return { xpGained: gained, actionGranted, leveledUp: profile.level > levelBefore };
 }
 
-// Macht eine heute abgeschlossene Quest rückgängig ("verklickt"): nimmt die dafür
-// vergebenen XP zurück, entfernt einen evtl. Sport-Log-Eintrag, und die verdienten
+// Macht den heutigen Fortschritt einer Quest komplett rückgängig: nimmt die dafür
+// insgesamt vergebenen XP zurück (bei Sport-Quests die Summe aller heutigen Sessions),
+// entfernt alle heutigen Sport-Log-Einträge dieser Quest, und die verdienten
 // Kampf-Aktionen sinken automatisch mit (rein aus der Quest-Anzahl abgeleitet) —
 // bereits für eine Fähigkeit eingesetzte Aktionen bleiben davon unberührt.
 function uncompleteQuestStage(state, profileId, questId) {
@@ -1557,13 +1563,13 @@ function uncompleteQuestStage(state, profileId, questId) {
 
   delete profile.questProgress[today][questId];
 
-  // Zugehörigen Sport-Log-Eintrag von heute entfernen (der zuletzt für diese Quest erfasste).
+  // ALLE heutigen Sport-Log-Einträge dieser Quest entfernen — nicht nur den letzten,
+  // da "Rückgängig machen" den kompletten heutigen Fortschritt dieser Quest aufhebt.
   if (profile.sportQuestLog && profile.sportQuestLog[today]) {
-    const idx = profile.sportQuestLog[today].map(e => e.questId).lastIndexOf(questId);
-    if (idx >= 0) profile.sportQuestLog[today].splice(idx, 1);
+    profile.sportQuestLog[today] = profile.sportQuestLog[today].filter(e => e.questId !== questId);
   }
 
-  const completedAfter = completedBefore - 1;
+  const completedAfter = Object.values(profile.questProgress[today] || {}).filter(v => v === 'komplett').length;
   const actionsAfter = actionsEarnedForQuestCount(completedAfter);
   const actionRevoked = actionsAfter < actionsBefore && getActionsSpentToday(profile) < actionsBefore;
 
@@ -2792,15 +2798,21 @@ function QuestEditModal({ quests, categories, onSave, onClose }) {
 
 // Minuten-Eingabe beim Erledigen einer Sport-Quest (Cardio/Krafttraining/eigene) —
 // bestimmt die XP (3 + 3 pro angefangene 5 Minuten) und fließt in die Sport-Analyse ein.
-function SportMinutesModal({ quest, onSave, onClose }) {
+function SportMinutesModal({ quest, alreadyLoggedMinutes, onSave, onUndo, onClose }) {
   const [minutes, setMinutes] = useState('30');
   const parsed = parseInt(minutes);
   const valid = /^\d+$/.test(minutes);
   const xpPreview = valid ? sportQuestXp(parsed) : null;
+  const hasToday = (alreadyLoggedMinutes || 0) > 0;
 
   return (
     <Modal title={`${quest.icon} ${quest.title}`} onClose={onClose}>
       <div className="space-y-4">
+        {hasToday && (
+          <div className="text-xs text-heal bg-heal/10 border border-heal/30 rounded-xl px-3 py-2">
+            Heute bereits {formatHM(alreadyLoggedMinutes)} erfasst — neue Eingabe kommt oben drauf.
+          </div>
+        )}
         <div className="text-xs text-inkDim">Wie viele Minuten hast du trainiert?</div>
         <input type="text" inputMode="numeric" value={minutes}
           onChange={e => setMinutes(e.target.value.replace(/\D/g, ''))}
@@ -2813,6 +2825,12 @@ function SportMinutesModal({ quest, onSave, onClose }) {
           className="w-full bg-gold disabled:opacity-40 text-bg font-semibold rounded-xl py-3">
           Eintragen
         </button>
+        {hasToday && (
+          <button onClick={onUndo}
+            className="w-full text-xs text-hp active:scale-[0.99]">
+            Heutigen Fortschritt rückgängig machen
+          </button>
+        )}
       </div>
     </Modal>
   );
@@ -2932,6 +2950,7 @@ function DeadlineCarousel({ deadlines, onComplete }) {
 function QuestCard({ quest, done, deadline, onComplete, onUncomplete, onSetDeadline }) {
   const [expanded, setExpanded] = useState(false);
   const [showDeadline, setShowDeadline] = useState(false);
+  const [showUndoConfirm, setShowUndoConfirm] = useState(false);
   const today = todayBerlin();
   const isSport = quest.category === SPORT_CATEGORY;
 
@@ -2970,29 +2989,12 @@ function QuestCard({ quest, done, deadline, onComplete, onUncomplete, onSetDeadl
       </div>
       <div className="flex gap-1.5 shrink-0 items-center">
         <button
-          onClick={onComplete}
-          disabled={done}
-          className={`text-xs font-semibold rounded-lg px-2.5 py-2 border ${
-            done ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim active:scale-95'
-          } disabled:opacity-50`}
+          onClick={() => { if (done && !isSport) setShowUndoConfirm(true); else onComplete(); }}
+          className={`text-xs font-semibold rounded-lg px-2.5 py-2 border active:scale-95 ${
+            done ? 'bg-heal/20 border-heal/50 text-heal' : 'bg-bgElevated border-border text-inkDim'
+          }`}
         >
-          {done ? '✓' : (isSport ? '⏱' : '✓')}
-        </button>
-        {done && (
-          <button
-            onClick={onUncomplete}
-            title="Rückgängig"
-            className="text-xs rounded-lg px-2 py-2 border border-border bg-bgElevated text-inkDim active:scale-95"
-          >
-            ↺
-          </button>
-        )}
-        <button onClick={() => setShowDeadline(true)}
-          title="Frist setzen"
-          className={`text-xs rounded-lg px-2 py-2 border ${
-            activeDeadline ? 'border-gold/50 bg-gold/10 text-gold' : 'border-border bg-bgElevated text-inkDim'
-          } active:scale-95`}>
-          📅
+          {isSport ? '⏱' : '✓'}
         </button>
       </div>
       {showDeadline && (
@@ -3003,6 +3005,16 @@ function QuestCard({ quest, done, deadline, onComplete, onUncomplete, onSetDeadl
           onDelete={() => { onSetDeadline(quest.id, null); setShowDeadline(false); }}
           onClose={() => setShowDeadline(false)}
         />
+      )}
+      {showUndoConfirm && (
+        <Modal title="Rückgängig machen?" onClose={() => setShowUndoConfirm(false)}>
+          <button
+            onClick={() => { onUncomplete(); setShowUndoConfirm(false); }}
+            className="w-full bg-hp/20 border border-hp/50 text-hp font-semibold rounded-xl py-3 active:scale-[0.99]"
+          >
+            Bestätigen
+          </button>
+        </Modal>
       )}
     </div>
   );
@@ -3164,7 +3176,13 @@ function QuestsTab({ state, profile, onQuestComplete, onQuestUncomplete, onAddQu
       {sportMinutesQuest && (
         <SportMinutesModal
           quest={sportMinutesQuest}
+          alreadyLoggedMinutes={
+            (profile.sportQuestLog?.[today] || [])
+              .filter(e => e.questId === sportMinutesQuest.id)
+              .reduce((s, e) => s + (e.minutes || 0), 0)
+          }
           onSave={(mins) => { onQuestComplete(sportMinutesQuest.id, mins); setSportMinutesQuest(null); }}
+          onUndo={() => { onQuestUncomplete(sportMinutesQuest.id); setSportMinutesQuest(null); }}
           onClose={() => setSportMinutesQuest(null)}
         />
       )}
